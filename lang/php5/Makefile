@@ -8,8 +8,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=php
-PKG_VERSION:=5.6.19
-PKG_RELEASE:=2
+PKG_VERSION:=5.6.25
+PKG_RELEASE:=1
 
 PKG_MAINTAINER:=W. Michael Petullo <mike@flyn.org>, Michael Heimpold <mhei@heimpold.de>
 
@@ -18,7 +18,7 @@ PKG_LICENSE_FILES:=LICENSE
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.xz
 PKG_SOURCE_URL:=http://www.php.net/distributions/
-PKG_MD5SUM:=aab960cc1b2bfbeb00d030a9d42b38bd
+PKG_MD5SUM:=81cb8c0de0d0b714587edbd27a2a75bb
 
 PKG_FIXUP:=libtool autoreconf
 PKG_BUILD_PARALLEL:=1
@@ -266,7 +266,7 @@ else
 endif
 
 ifneq ($(SDK)$(CONFIG_PACKAGE_php5-mod-mcrypt),)
-  CONFIGURE_ARGS+=  --with-mcrypt=shared,"$(STAGING_DIR)/usr"
+  CONFIGURE_ARGS+= --with-mcrypt=shared,"$(STAGING_DIR)/usr"
 else
   CONFIGURE_ARGS+= --without-mcrypt
 endif

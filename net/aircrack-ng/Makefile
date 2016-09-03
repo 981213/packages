@@ -28,7 +28,7 @@ include $(INCLUDE_DIR)/package.mk
 define Package/aircrack-ng
   SECTION:=net
   CATEGORY:=Network
-  DEPENDS:=+libpcap +libpthread +libopenssl +libnl-core +libnl-genl
+  DEPENDS:=+libpcap +libpthread +libopenssl +libnl-core +libnl-genl +zlib
   TITLE:=WLAN tools (without airmon-ng) for breaking 802.11 WEP/WPA keys
   URL:=http://www.aircrack-ng.org/
   SUBMENU:=wireless
@@ -41,7 +41,7 @@ endef
 define Package/airmon-ng
   SECTION:=net
   CATEGORY:=Network
-  DEPENDS:=+wireless-tools +ethtool +procps +CONFIG_PCI_SUPPORT:pciutils +CONFIG_USB_SUPPORT:usbutils
+  DEPENDS:=+wireless-tools +ethtool +procps-ng +CONFIG_PCI_SUPPORT:pciutils +CONFIG_USB_SUPPORT:usbutils
   TITLE:=Bash script designed to turn wireless cards into monitor mode.
   URL:=http://www.aircrack-ng.org/
   SUBMENU:=wireless

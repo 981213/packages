@@ -8,12 +8,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=sqlite
-PKG_VERSION:=3120200
-PKG_RELEASE:=1
+PKG_VERSION:=3130000
+PKG_RELEASE:=2
 
 PKG_SOURCE:=$(PKG_NAME)-autoconf-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://www.sqlite.org/2016/
-PKG_MD5SUM:=c552a133aca1ce1d647163d9e43bbcb1
+PKG_MD5SUM:=4e83f39fa2ffb610ac5ecd36865da6a2
 
 PKG_LICENSE:=PUBLICDOMAIN
 PKG_LICENSE_FILES:=
@@ -74,6 +74,7 @@ TARGET_CFLAGS += $(FPIC) \
 CONFIGURE_ARGS += \
 	--enable-shared \
 	--enable-static \
+	--disable-editline
 
 CONFIGURE_VARS += \
 	config_BUILD_CC="$(HOSTCC)" \

@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=transmission
 PKG_VERSION:=2.92
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.xz
 PKG_SOURCE_URL:=http://download-origin.transmissionbt.com/files/ http://mirrors.m0k.org/transmission/files
@@ -34,9 +34,8 @@ endef
 
 define Package/transmission-daemon/Default
   $(call Package/transmission/template)
-  DEPENDS:=+libcurl +libpthread +libevent2 +librt
+  DEPENDS:=+libcurl +libpthread +libevent2 +librt +zlib
   USERID:=transmission=224:transmission=224
-  PROVIDES:=transmission-daemon
 endef
 
 define Package/transmission-daemon-openssl
@@ -49,13 +48,13 @@ endef
 define Package/transmission-daemon-polarssl
   $(call Package/transmission-daemon/Default)
   TITLE+= (with PolarSSL)
-  DEPENDS+=+libpolarssl +zlib
+  DEPENDS+=+libpolarssl
   VARIANT:=polarssl
 endef
 
 define Package/transmission-cli/Default
   $(call Package/transmission/template)
-  DEPENDS:=+libcurl +libpthread +libevent2 +librt
+  DEPENDS:=+libcurl +libpthread +libevent2 +librt +zlib
 endef
 
 define Package/transmission-cli-openssl
@@ -68,13 +67,13 @@ endef
 define Package/transmission-cli-polarssl
   $(call Package/transmission-cli/Default)
   TITLE+= (with PolarSSL)
-  DEPENDS+=+libpolarssl +zlib
+  DEPENDS+=+libpolarssl
   VARIANT:=polarssl
 endef
 
 define Package/transmission-remote/Default
   $(call Package/transmission/template)
-  DEPENDS:=+libcurl +libpthread +libevent2 +librt
+  DEPENDS:=+libcurl +libpthread +libevent2 +librt +zlib
 endef
 
 define Package/transmission-remote-openssl
@@ -87,14 +86,14 @@ endef
 define Package/transmission-remote-polarssl
   $(call Package/transmission-remote/Default)
   TITLE+= (with PolarSSL)
-  DEPENDS+=+libpolarssl +zlib
+  DEPENDS+=+libpolarssl
   VARIANT:=polarssl
 endef
 
 define Package/transmission-web
   $(call Package/transmission/template)
   TITLE+= (webinterface)
-  DEPENDS:=transmission-daemon
+  DEPENDS:=@(PACKAGE_transmission-daemon-openssl||PACKAGE_transmission-daemon-polarssl)
 endef
 
 
