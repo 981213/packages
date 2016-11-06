@@ -26,7 +26,7 @@ define Package/libdevmapper
   CATEGORY:=Libraries
   TITLE:=The Linux Kernel Device Mapper userspace library
   URL:=http://sourceware.org/dm/
-  DEPENDS:=+kmod-dm +libpthread +libuuid
+  DEPENDS:=+kmod-dm +libpthread +libuuid +librt
 endef
 
 define Package/libdevmapper/description
@@ -37,7 +37,7 @@ endef
 define Package/lvm2
   SECTION:=utils
   CATEGORY:=Utilities
-  SUBMENU:=disc
+  SUBMENU:=Disc
   TITLE:=The Linux Logical Volume Manager
   URL:=http://sourceware.org/lvm2/
   DEPENDS:=+libdevmapper +libblkid +libreadline +libncurses

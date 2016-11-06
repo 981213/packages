@@ -10,9 +10,8 @@
 #
 adb_pid="${$}"
 adb_pidfile="/var/run/adblock.pid"
-adb_scriptver="1.4.10"
-adb_mincfgver="2.5"
 adb_scriptdir="${0%/*}"
+
 if [ -r "${adb_pidfile}" ]
 then
     rc=255
@@ -42,6 +41,8 @@ f_envcheck
 
 # main loop for all block list sources
 #
+f_log "use '${adb_fetch}' for list downloads"
+
 for src_name in ${adb_sources}
 do
     # check disabled sources

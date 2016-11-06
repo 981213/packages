@@ -8,7 +8,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=gnunet
-PKG_SOURCE_VERSION:=38014
+PKG_SOURCE_VERSION:=38231
 PKG_VERSION:=0.10.1-svn$(PKG_SOURCE_VERSION)
 PKG_RELEASE:=1
 
@@ -143,7 +143,7 @@ define Package/gnunet/install
 	done )
 
 	( for lib in arm ats block cadet core datacache dht \
-	    dns dnsparser dnsstub fragmentation friends hello identity nat nse \
+	    dns dnsparser fragmentation friends hello identity nat nse \
 	    peerinfo regexblock regex revocation scalarproduct set \
 	    statistics transport util; do \
 		$(CP) $(PKG_INSTALL_DIR)/usr/lib/libgnunet$$$$lib.so* $(1)/usr/lib/ ; \
@@ -268,6 +268,9 @@ LIB_social:=consensus identityprovider multicast psyc psycstore psycutil secrets
 LIBEXEC_social:=service-consensus service-evil-consensus service-identity-provider service-multicast service-psyc service-psycstore service-secretsharing service-social
 CONF_social:=consensus multicast psyc psycstore secretsharing social
 
+PLUGIN_dhtcache-heap:=datacache_heap
+CONFLICTS_dhtcache-heap:=gnunet-dhtcache-pgsql gnunet-dhtcache-sqlite
+
 DEPENDS_gns-flat:=+gnunet-gns
 PLUGIN_gns-flat:=namecache_flat namestore_flat
 
@@ -275,7 +278,7 @@ DEPENDS_peerstore-flat:=+gnunet-peerstore
 PLUGIN_peerstore-flat:=peerstore_flat
 
 DEPENDS_fs-heap:=+gnunet-datastore
-PLUGIN_fs-heap:=datacache_heap datastore_heap
+PLUGIN_fs-heap:=datastore_heap
 CONFLICTS_fs-heap:=gnunet-fs-mysql gnunet-fs-pgsql gnunet-fs-sqlite
 
 DEPENDS_mysql:=+libmysqlclient
@@ -292,13 +295,21 @@ CONFLICTS_fs-mysql:=gnunet-fs-pgsql gnunet-fs-sqlite
 DEPENDS_pgsql:=+libpq
 LIB_pgsql:=postgres pq
 
+DEPENDS_dhtcache-pgsql:=+gnunet-pgsql
+PLUGIN_dhtcache-pgsql:=datacache_postgres
+CONFLICTS_dhtcache-pgsql:=gnunet-dhtcache-sqlite
+
 DEPENDS_fs-pgsql:=+gnunet-pgsql +gnunet-datastore
-PLUGIN_fs-pgsql:=datacache_postgres datastore_postgres
+PLUGIN_fs-pgsql:=datastore_postgres
 CONFLICTS_fs-pgsql:=gnunet-fs-sqlite
 
 DEPENDS_gns-pgsql:=+gnunet-pgsql +gnunet-gns
 PLUGIN_gns-pgsql:=namecache_postgres namestore_postgres
 CONFLICTS_gns-pgsql:=gnunet-gns-sqlite gnunet-gns-flat
+
+DEPENDS_social-pgsql:=+gnunet-pgsql +gnunet-social
+PLUGIN_social-pgsql:=psycstore_postgres
+CONFLICTS_social-pgsql:=gnunet-social-sqlite gnunet-social-mysql
 
 DEPENDS_sqlite:=+libsqlite3
 
@@ -310,8 +321,11 @@ DEPENDS_peerstore-sqlite:=+gnunet-sqlite +gnunet-peerstore
 PLUGIN_peerstore-sqlite:=peerstore_sqlite
 CONFLICTS_peerstore-sqlite:=gnunet-peerstore-flat
 
+DEPENDS_dhtcache-sqlite:=+gnunet-sqlite
+PLUGIN_dhtcache-sqlite:=datacache_sqlite
+
 DEPENDS_fs-sqlite:=+gnunet-sqlite +gnunet-datastore
-PLUGIN_fs-sqlite:=datacache_sqlite datastore_sqlite
+PLUGIN_fs-sqlite:=datastore_sqlite
 LIBEXEC_fs-sqlite:=daemon-latency-logger
 
 DEPENDS_social-sqlite:=+gnunet-sqlite +gnunet-social
@@ -326,7 +340,7 @@ BIN_utils:=gns-proxy-setup-ca transport-certificate-creation scrypt
 
 DEPENDS_vpn:=+kmod-tun +iptables +firewall
 BIN_vpn:=vpn
-LIB_vpn:=tun vpn
+LIB_vpn:=dnsstub tun vpn
 LIBEXEC_vpn:=daemon-exit daemon-pt helper-exit helper-vpn service-vpn
 CONF_vpn:=exit pt vpn
 
@@ -378,34 +392,38 @@ $(eval $(call PostInstFixSUIDPerms,gnunet-vpn))
 $(eval $(call BuildPackage,gnunet))
 $(eval $(call BuildComponent,conversation,conversation component,))
 $(eval $(call BuildComponent,datastore,data storage components,))
-$(eval $(call BuildComponent,dv,distance-vector routing component,))
+$(eval $(call BuildComponent,dv,distance-vector routing component,y))
 $(eval $(call BuildComponent,experiments,experimental components,))
 $(eval $(call BuildComponent,fs,file-sharing components,))
 $(eval $(call BuildComponent,gns,name resolution components,y))
 $(eval $(call BuildComponent,gns-proxy,gns-proxy component,))
-$(eval $(call BuildComponent,hostlist,HTTP bootstrap hostlist client and server,))
+$(eval $(call BuildComponent,hostlist,HTTP bootstrap hostlist client and server,y))
 $(eval $(call BuildComponent,peerstore,peerstore local persistency component,))
 $(eval $(call BuildComponent,rest,REST interface,))
-$(eval $(call BuildComponent,rps,RPS routing component,))
+$(eval $(call BuildComponent,rps,RPS routing component,y))
 $(eval $(call BuildComponent,social,social components,))
 $(eval $(call BuildComponent,namestore-fcfsd,first-come-first-serve registration server,))
-$(eval $(call BuildComponent,fs-heap,heap-based filesharing plugins,))
-$(eval $(call BuildComponent,gns-flat,flat storage GNS plugins,))
+$(eval $(call BuildComponent,dhtcache-heap,heap-based dhtcache plugin,y))
+$(eval $(call BuildComponent,fs-heap,heap-based filesharing plugin,))
+$(eval $(call BuildComponent,gns-flat,flat storage GNS plugins,y))
 $(eval $(call BuildComponent,peerstore-flat,flat storage peerstore plugin,))
 $(eval $(call BuildComponent,mysql,mySQL datastore backend,))
 $(eval $(call BuildComponent,fs-mysql,mySQL filesharing plugins,))
 $(eval $(call BuildComponent,social-mysql,mySQL social plugins,))
 $(eval $(call BuildComponent,pgsql,PostgreSQL storage backends,))
-$(eval $(call BuildComponent,fs-pgsql,PostgreSQL filesharing plugins,))
+$(eval $(call BuildComponent,dhtcache-pgsql,PostgreSQL dhtcache plugin,))
+$(eval $(call BuildComponent,fs-pgsql,PostgreSQL filesharing plugin,))
 $(eval $(call BuildComponent,gns-pgsql,PostgreSQL GNS plugins,))
+$(eval $(call BuildComponent,social-pgsql,PostgreSQL social plugin,))
 $(eval $(call BuildComponent,sqlite,libsqlite3 storage backends,))
-$(eval $(call BuildComponent,fs-sqlite,libsqlite3 filesharing plugins,))
+$(eval $(call BuildComponent,dhtcache-sqlite,libsqlite3 dhtcache plugin,))
+$(eval $(call BuildComponent,fs-sqlite,libsqlite3 filesharing plugin,))
 $(eval $(call BuildComponent,gns-sqlite,libsqlite3 gns plugins,))
 $(eval $(call BuildComponent,peerstore-sqlite,libsqlite3 peerstore plugin,))
 $(eval $(call BuildComponent,social-sqlite,libsqlite3 social plugins,))
 $(eval $(call BuildComponent,transport-bluetooth,bluetooth transport,))
 $(eval $(call BuildComponent,transport-http_client,HTTP/HTTPS client transport,y))
 $(eval $(call BuildComponent,transport-http_server,HTTP/HTTPS server transport,))
-$(eval $(call BuildComponent,transport-wlan,WLAN transport,))
+$(eval $(call BuildComponent,transport-wlan,WLAN transport,y))
 $(eval $(call BuildComponent,utils,administration utililties,))
 $(eval $(call BuildComponent,vpn,vpn components,y))
