@@ -6,8 +6,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=php
-PKG_VERSION:=7.1.0
-PKG_RELEASE:=1
+PKG_VERSION:=7.1.6
+PKG_RELEASE:=2
 
 PKG_MAINTAINER:=Michael Heimpold <mhei@heimpold.de>
 
@@ -16,8 +16,8 @@ PKG_LICENSE_FILES:=LICENSE
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.xz
 PKG_SOURCE_URL:=http://www.php.net/distributions/
-PKG_MD5SUM:=cf36039303c47f493100afea522a8f53
-PKG_HASH:=a810b3f29c21407c24caa88f50649320d20ba6892ae1923132598b8a0ca145b6
+PKG_MD5SUM:=eafc7a79cc8cc62c9292c96f9c9ccf90
+PKG_HASH:=01584dc521ab7ec84b502b61952f573652fe6aa00c18d6d844fb9209f14b245b
 
 PKG_FIXUP:=libtool autoreconf
 PKG_BUILD_PARALLEL:=1
@@ -37,7 +37,7 @@ PHP7_MODULES = \
 	mbstring mcrypt mysqli \
 	opcache openssl \
 	pcntl pdo pdo-mysql pdo-pgsql pdo-sqlite pgsql phar \
-	session shmop simplexml soap sockets sqlite3 sysvmsg sysvsem sysvshm \
+	session shmop simplexml snmp soap sockets sqlite3 sysvmsg sysvsem sysvshm \
 	tokenizer \
 	xml xmlreader xmlwriter zip \
 
@@ -66,6 +66,7 @@ define Package/php7/config
 	config PHP7_FILTER
 		bool "PHP7 Filter support"
 		depends on PACKAGE_php7-cli || PACKAGE_php7-cgi
+		default y
 
 	config PHP7_LIBXML
 		bool "PHP7 LIBXML support"
@@ -142,6 +143,9 @@ define Package/php7-fpm/description
   This package contains the FastCGI Process Manager of the PHP7 interpreter.
 endef
 
+# not everything groks --disable-nls
+DISABLE_NLS:=
+
 CONFIGURE_ARGS+= \
 	--enable-cli \
 	--enable-cgi \
@@ -215,7 +219,6 @@ ifneq ($(SDK)$(CONFIG_PACKAGE_php7-mod-gd),)
 	--with-jpeg-dir="$(STAGING_DIR)/usr" \
 	--with-png-dir="$(STAGING_DIR)/usr" \
 	--without-xpm-dir \
-	--without-t1lib \
 	--enable-gd-native-ttf \
 	--disable-gd-jis-conv
 else
@@ -242,6 +245,7 @@ endif
 
 ifneq ($(SDK)$(CONFIG_PACKAGE_php7-mod-intl),)
   CONFIGURE_ARGS+= --enable-intl=shared
+  TARGET_CXXFLAGS+= -std=c++0x
 else
   CONFIGURE_ARGS+= --disable-intl
 endif
@@ -284,7 +288,7 @@ else
   CONFIGURE_ARGS+= --disable-opcache
 endif
 
-ifneq ($(SDK)$(CONFIG_PACKAGE_php7-mod-openssl),)
+ifneq ($(SDK)$(CONFIG_PACKAGE_php7-mod-openssl)$(CONFIG_PACKAGE_php7-mod-snmp),)
   CONFIGURE_ARGS+= \
 	--with-openssl=shared,"$(STAGING_DIR)/usr" \
 	--with-kerberos=no \
@@ -348,6 +352,12 @@ ifneq ($(SDK)$(CONFIG_PACKAGE_php7-mod-simplexml),)
   CONFIGURE_ARGS+= --enable-simplexml=shared
 else
   CONFIGURE_ARGS+= --disable-simplexml
+endif
+
+ifneq ($(SDK)$(CONFIG_PACKAGE_php7-mod-snmp),)
+  CONFIGURE_ARGS+= --with-snmp=shared,"$(STAGING_DIR)/usr"
+else
+  CONFIGURE_ARGS+= --without-snmp
 endif
 
 ifneq ($(SDK)$(CONFIG_PACKAGE_php7-mod-soap),)
@@ -444,7 +454,7 @@ CONFIGURE_VARS+= \
 	ac_cv_c_bigendian_php=$(if $(CONFIG_BIG_ENDIAN),yes,no) \
 	php_cv_cc_rpath="no" \
 	iconv_impl_name="gnu_libiconv" \
-	ac_cv_php_xml2_config_path="$(STAGING_DIR_HOSTPKG)/bin/xml2-config" \
+	ac_cv_php_xml2_config_path="$(STAGING_DIR)/host/bin/xml2-config" \
 
 define Package/php7/conffiles
 /etc/php.ini
@@ -581,6 +591,7 @@ $(eval $(call BuildModule,phar,Phar Archives,+php7-mod-hash))
 $(eval $(call BuildModule,session,Session))
 $(eval $(call BuildModule,shmop,Shared Memory))
 $(eval $(call BuildModule,simplexml,SimpleXML,+@PHP7_LIBXML +PACKAGE_php7-mod-simplexml:libxml2))
+$(eval $(call BuildModule,snmp,SNMP,+PACKAGE_php7-mod-snmp:libnetsnmp +PACKAGE_php7-mod-snmp:libopenssl))
 $(eval $(call BuildModule,soap,SOAP,+@PHP7_LIBXML +PACKAGE_php7-mod-soap:libxml2))
 $(eval $(call BuildModule,sockets,Sockets))
 $(eval $(call BuildModule,sqlite3,SQLite3,+PACKAGE_php7-mod-sqlite3:libsqlite3))

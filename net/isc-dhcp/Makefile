@@ -10,11 +10,11 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=isc-dhcp
 UPSTREAM_NAME:=dhcp
 PKG_VERSION:=4.3.5
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_LICENSE:=BSD-3-Clause
 PKG_LICENSE_FILES:=LICENSE
-PKG_MAINTAINER:=Antony Antony <antony@phenome.org>
+PKG_MAINTAINER:=Philip Prindeville <philipp@redfish-solutions.com>
 
 PKG_SOURCE:=$(UPSTREAM_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=ftp://ftp.isc.org/isc/dhcp/$(PKG_VERSION) \
@@ -200,11 +200,10 @@ define Package/isc-dhcp-relay-$(BUILD_VARIANT)/install
 endef
 
 define Package/isc-dhcp-server-$(BUILD_VARIANT)/install
-	$(INSTALL_DIR) $(1)/usr/sbin $(1)/etc
-	$(INSTALL_DIR) $(1)/usr/sbin $(1)/etc/init.d
+	$(INSTALL_DIR) $(1)/usr/sbin $(1)/etc/init.d $(1)/etc/uci-defaults
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/sbin/dhcpd $(1)/usr/sbin
 	$(INSTALL_BIN) ./files/dhcpd.init $(1)/etc/init.d/dhcpd
-	$(INSTALL_BIN) ./files/dhcpd.conf $(1)/etc
+	$(INSTALL_BIN) ./files/dhcpd.defaults $(1)/etc/uci-defaults
 ifeq ($(BUILD_VARIANT),ipv6)
 	$(INSTALL_BIN) ./files/dhcpd6.init $(1)/etc/init.d/dhcpd6
 	$(INSTALL_BIN) ./files/dhcpd6.conf $(1)/etc

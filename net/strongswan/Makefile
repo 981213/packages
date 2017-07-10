@@ -8,12 +8,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=strongswan
-PKG_VERSION:=5.5.1
+PKG_VERSION:=5.5.3
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.bz2
+PKG_HASH:=c5ea54b199174708de11af9b8f4ecf28b5b0743d4bc0e380e741f25b28c0f8d4
 PKG_SOURCE_URL:=http://download.strongswan.org/ http://download2.strongswan.org/
-PKG_MD5SUM:=4eba9474f7dc6c8c8d7037261358e68d
 PKG_LICENSE:=GPL-2.0+
 PKG_MAINTAINER:=Stijn Tintel <stijn@linux-ipv6.be>
 
@@ -32,6 +32,7 @@ PKG_MOD_AVAILABLE:= \
 	coupling \
 	ctr \
 	curl \
+	curve25519 \
 	des \
 	dhcp \
 	dnskey \
@@ -150,6 +151,7 @@ $(call Package/strongswan/Default)
 	+strongswan-mod-coupling \
 	+strongswan-mod-ctr \
 	+strongswan-mod-curl \
+	+strongswan-mod-curve25519 \
 	+strongswan-mod-des \
 	+strongswan-mod-dhcp \
 	+strongswan-mod-dnskey \
@@ -374,6 +376,7 @@ CONFIGURE_ARGS+= \
 	--disable-scripts \
 	--disable-static \
 	--disable-fast \
+	--enable-mediation \
 	--with-systemdsystemunitdir=no \
 	$(if $(CONFIG_PACKAGE_strongswan-utils),--enable-pki --enable-scepclient,--disable-pki --disable-scepclient) \
 	--with-random-device=/dev/random \
@@ -516,6 +519,7 @@ $(eval $(call BuildPlugin,constraints,advanced X509 constraint checking,))
 $(eval $(call BuildPlugin,coupling,IKEv2 plugin to couple peer certificates permanently to authentication,))
 $(eval $(call BuildPlugin,ctr,Counter Mode wrapper crypto,))
 $(eval $(call BuildPlugin,curl,cURL fetcher plugin,+PACKAGE_strongswan-mod-curl:libcurl))
+$(eval $(call BuildPlugin,curve25519,Curve25519 Diffie-Hellman,))
 $(eval $(call BuildPlugin,des,DES crypto,))
 $(eval $(call BuildPlugin,dhcp,DHCP based attribute provider,))
 $(eval $(call BuildPlugin,dnskey,DNS RR key decoding,))

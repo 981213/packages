@@ -42,7 +42,7 @@
 
 "able.or.kr"		"http://able.or.kr/ddns/src/update.php?hostname=[DOMAIN]&myip=[IP]&ddnsuser=[USERNAME]&pwd=[PASSWORD]"
 
-"afraid.org-basicauth"	"http://[USERNAME]:[PASSWORD]@freedns.afraid.org/nic/update?hostname=[DOMAIN]&myip=[IP]
+"afraid.org-basicauth"	"http://[USERNAME]:[PASSWORD]@freedns.afraid.org/nic/update?hostname=[DOMAIN]&myip=[IP]"
 "afraid.org-keyauth"	"http://freedns.afraid.org/dynamic/update.php?[PASSWORD]&address=[IP]"
 
 "all-inkl.com"		"http://[USERNAME]:[PASSWORD]@dyndns.kasserver.com/?myip=[IP]"
@@ -64,11 +64,11 @@
 
 "dnsdynamic.org"	"http://[USERNAME]:[PASSWORD]@www.dnsdynamic.org/api/?hostname=[DOMAIN]&myip=[IP]"	"good|nochg"
 
-"dnsexit.com"		"http://www.dnsexit.com/RemoteUpdate.sv?login=[USERNAME]&password=[PASSWORD]&host=[DOMAIN]&myip=[IP]"	"0=|1="
+"dnsexit.com"		"http://update.dnsexit.com/RemoteUpdate.sv?login=[USERNAME]&password=[PASSWORD]&host=[DOMAIN]&myip=[IP]"
 
 "dnshome.de"		"http://[USERNAME]:[PASSWORD]@www.dnshome.de/dyndns.php?hostname=[DOMAIN]&ip=[IP]"
 
-"dnsmadeeasy.com"	"http://www.dnsmadeeasy.com/servlet/updateip?username=[USERNAME]&password=[PASSWORD}&id=[DOMAIN]&ip=[IP]"	"success|ip-same"
+"dnsmadeeasy.com"	"http://cp.dnsmadeeasy.com/servlet/updateip?username=[USERNAME]&password=[PASSWORD]&id=[DOMAIN]&ip=[IP]"	"success|ip-same"
 
 "dnsmax.com"		"http://update.dnsmax.com/update/?username=[USERNAME]&password=[PASSWORD]&resellerid=1&clientname=openwrt&clientversion=8.09&protocolversion=2.0&updatehostname=[DOMAIN]&ip=[IP]"
 
@@ -84,7 +84,7 @@
 
 "duckdns.org"		"http://www.duckdns.org/update?domains=[USERNAME]&token=[PASSWORD]&ip=[IP]"	"OK"
 
-"duiadns.net"		"http://[USERNAME]:[PASSWORD]@ipv4.duia.ro/dynamic.duia?host=[DOMAIN]&ip4=[IP]"
+"duiadns.net"		"http://ip.duiadns.net/dynamic.duia?host=[DOMAIN]&password=[PASSWORD]&ip4=[IP]"
 
 "dy.fi"			"http://[USERNAME]:[PASSWORD]@www.dy.fi/nic/update?hostname=[DOMAIN]"	"good|nochg"
 

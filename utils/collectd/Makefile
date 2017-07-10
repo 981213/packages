@@ -8,16 +8,17 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=collectd
-PKG_VERSION:=5.5.3
+PKG_VERSION:=5.7.2
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.bz2
-PKG_SOURCE_URL:=http://collectd.org/files/
-PKG_MD5SUM:=6f10633d0f73f99ef61472a8e377d4a058de161e80f3353b4b17d394c68f2f44
+PKG_SOURCE_URL:=https://collectd.org/files/ \
+	https://github.com/collectd/collectd/releases/download/collectd-$(PKG_VERSION)
+PKG_HASH:=9d20a0221569a8d6b80bbc52b86e5e84965f5bafdbf5dfc3790e0fed0763e592
 
 PKG_FIXUP:=autoreconf
 PKG_REMOVE_FILES:=aclocal.m4 libltdl/aclocal.m4
-PKG_MAINTAINER:=Jo-Philipp Wich <jo@mein.io>
+PKG_MAINTAINER:=Jo-Philipp Wich <jo@mein.io>, Hannu Nyman <hannu.nyman@iki.fi>
 
 PKG_INSTALL:=1
 PKG_BUILD_PARALLEL:=1
@@ -31,33 +32,43 @@ COLLECTD_PLUGINS_DISABLED:= \
 	battery \
 	ceph \
 	cgroups \
+	cpusleep \
 	curl_json \
 	curl_xml \
 	dbi \
+	dpdkstat \
 	drbd \
 	ethstat \
 	fhcount \
 	genericjmx \
 	gmond \
+	gps \
+	grpc \
 	hddtemp \
+	hugepages \
+	intel_rdt \
 	ipc \
 	ipmi \
 	ipvs \
 	java \
 	log_logstash \
+	lua \
 	lvm \
 	lpar \
+	madwifi \
 	mbmon \
 	md \
 	memcachec \
 	memcached \
 	mic \
 	monitorus \
+	mqtt \
 	multimeter \
 	netapp \
 	nfs \
 	notify_desktop \
 	notify_email \
+	notify_nagios \
 	numa \
 	openldap \
 	openvz \
@@ -84,12 +95,15 @@ COLLECTD_PLUGINS_DISABLED:= \
 	write_kafka \
 	write_log \
 	write_mongodb \
+	write_prometheus \
 	write_redis \
 	write_riemann \
 	write_sensu \
 	write_tsdb \
+	xencpu \
 	xmms \
 	zfs_arc \
+	zone \
 	zookeeper
 
 COLLECTD_PLUGINS_SELECTED:= \
@@ -97,6 +111,7 @@ COLLECTD_PLUGINS_SELECTED:= \
 	apcups \
 	ascent \
 	bind \
+	chrony \
 	conntrack \
 	contextswitch \
 	cpu \
@@ -117,7 +132,11 @@ COLLECTD_PLUGINS_SELECTED:= \
 	iwinfo \
 	load \
 	logfile \
-	madwifi \
+	match_empty_counter \
+	match_hashed \
+	match_regex \
+	match_timediff \
+	match_value \
 	memory \
 	modbus \
 	mysql \
@@ -163,7 +182,7 @@ define Package/collectd/Default
   SECTION:=utils
   CATEGORY:=Utilities
   TITLE:=Lightweight system statistics collection daemon
-  URL:=http://verplant.org/collectd/
+  URL:=https://collectd.org/
 endef
 
 define Package/collectd
@@ -177,33 +196,20 @@ define Package/collectd/description
  and provides mechanismns to store the values in a variety of ways.
 endef
 
-define Package/collectd/config
-	config PACKAGE_COLLECTD_ENCRYPTED_NETWORK
-	bool "Enable ability to use encrypted networking"
-	default n
-	depends on PACKAGE_collectd
-	select PACKAGE_collectd-mod-network
-endef
-
 ifneq ($(CONFIG_avr32),)
   TARGET_CFLAGS += -fsigned-char
 endif
 
 # common configure args
 CONFIGURE_ARGS+= \
+	--disable-werror \
 	--disable-debug \
 	--enable-daemon \
 	--with-nan-emulation \
+	--with-libyajl=no \
+	--without-libgcrypt \
 	--without-perl-bindings \
 	--without-libudev
-
-ifneq ($(CONFIG_PACKAGE_COLLECTD_ENCRYPTED_NETWORK),)
-CONFIGURE_ARGS+= \
-	--with-libgcrypt=$(STAGING_DIR)/include
-else
-CONFIGURE_ARGS+= \
-	--without-libgcrypt
-endif
 
 CONFIGURE_VARS+= \
 	CFLAGS="$$$$CFLAGS $(FPIC)" \
@@ -309,10 +315,11 @@ $(eval $(call BuildPlugin,apache,apache status input,apache,+PACKAGE_collectd-mo
 $(eval $(call BuildPlugin,apcups,apcups status input,apcups,))
 $(eval $(call BuildPlugin,ascent,ascent status input,ascent,+PACKAGE_collectd-mod-ascent:libcurl +PACKAGE_collectd-mod-ascent:libxml2))
 $(eval $(call BuildPlugin,bind,BIND server/zone input,bind,+PACKAGE_collectd-mod-bind:libcurl +PACKAGE_collectd-mod-bind:libxml2))
+$(eval $(call BuildPlugin,chrony,chrony status input,chrony,))
 $(eval $(call BuildPlugin,conntrack,connection tracking table size input,conntrack,))
 $(eval $(call BuildPlugin,contextswitch,context switch input,contextswitch,))
 $(eval $(call BuildPlugin,cpu,CPU input,cpu,))
-$(eval $(call BuildPlugin,cpufreq,CPU Freq input,cpufreq,@(TARGET_x86||TARGET_x86_64||TARGET_mvebu||TARGET_ipq806x))) # Only enable on x86 mvebu and ipq806x
+$(eval $(call BuildPlugin,cpufreq,CPU Freq input,cpufreq,@(TARGET_x86||TARGET_x86_64||TARGET_mvebu||TARGET_ipq806x||TARGET_armvirt))) # Only enable on x86 mvebu ipq806x armvirt
 $(eval $(call BuildPlugin,csv,CSV output,csv,))
 $(eval $(call BuildPlugin,curl,cURL input,curl,+PACKAGE_collectd-mod-curl:libcurl))
 #$(eval $(call BuildPlugin,dbi,relational database input,dbi,+PACKAGE_collectd-mod-dbi:libdbi))
@@ -330,15 +337,19 @@ $(eval $(call BuildPlugin,irq,interrupt usage input,irq,))
 $(eval $(call BuildPlugin,iwinfo,libiwinfo wireless statistics,iwinfo,+PACKAGE_collectd-mod-iwinfo:libiwinfo))
 $(eval $(call BuildPlugin,load,system load input,load,))
 $(eval $(call BuildPlugin,logfile,log files output,logfile,))
-$(eval $(call BuildPlugin,madwifi,MadWifi status input,madwifi,))
+$(eval $(call BuildPlugin,match-empty-counter,empty-counter match,match_empty_counter,))
+$(eval $(call BuildPlugin,match-hashed,hashed match,match_hashed,))
+$(eval $(call BuildPlugin,match-regex,regex match,match_regex,))
+$(eval $(call BuildPlugin,match-timediff,timediff match,match_timediff,))
+$(eval $(call BuildPlugin,match-value,value match,match_value,))
 #$(eval $(call BuildPlugin,mysql,MySQL status input,mysql,+PACKAGE_collectd-mod-mysql:libmysqlclient-r))
 $(eval $(call BuildPlugin,memory,physical memory usage input,memory,))
 $(eval $(call BuildPlugin,modbus,read variables through libmodbus,modbus,+PACKAGE_collectd-mod-modbus:libmodbus))
 $(eval $(call BuildPlugin,netlink,netlink input,netlink,+PACKAGE_collectd-mod-netlink:libmnl))
-$(eval $(call BuildPlugin,network,network input/output,network,+PACKAGE_COLLECTD_ENCRYPTED_NETWORK:libgcrypt))
+$(eval $(call BuildPlugin,network,network input/output,network,))
 $(eval $(call BuildPlugin,nginx,nginx status input,nginx,+PACKAGE_collectd-mod-nginx:libcurl))
 $(eval $(call BuildPlugin,ntpd,NTP daemon status input,ntpd,))
-$(eval $(call BuildPlugin,nut,UPS monitoring input,nut,+PACKAGE_collectd-mod-nut:nut))
+$(eval $(call BuildPlugin,nut,UPS monitoring input,nut,+PACKAGE_collectd-mod-nut:nut-common))
 $(eval $(call BuildPlugin,olsrd,OLSRd status input,olsrd,))
 $(eval $(call BuildPlugin,onewire,onewire sensor input,onewire,+PACKAGE_collectd-mod-onewire:libow-capi @BROKEN))
 $(eval $(call BuildPlugin,openvpn,OpenVPN traffic/compression input,openvpn,))

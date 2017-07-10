@@ -9,7 +9,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=net-snmp
 PKG_VERSION:=5.7.3
-PKG_RELEASE:=2
+PKG_RELEASE:=6
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=@SF/net-snmp
@@ -98,6 +98,7 @@ endef
 
 
 SNMP_MIB_MODULES_INCLUDED = \
+	agent/extend \
 	agentx \
 	host/hr_device \
 	host/hr_disk \
@@ -208,6 +209,7 @@ define Build/InstallDev
 	$(INSTALL_DIR) $(2)/bin
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/net-snmp-config $(2)/bin/
 	$(SED) 's,=/usr,=$(STAGING_DIR)/usr,g' $(2)/bin/net-snmp-config
+	$(LN) $(STAGING_DIR)/host/bin/net-snmp-config $(STAGING_DIR)/usr/bin/
 
 	$(INSTALL_DIR) $(1)/usr/include
 	$(CP) $(PKG_INSTALL_DIR)/usr/include/net-snmp $(1)/usr/include/

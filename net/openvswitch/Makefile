@@ -12,43 +12,24 @@ include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=openvswitch
 
-PKG_RELEASE:=7
-PKG_VERSION:=2.5.0
+PKG_RELEASE:=2
+PKG_VERSION:=2.7.0
 PKG_RELEASE=$(PKG_SOURCE_VERSION)
 PKG_LICENSE:=Apache-2.0
 PKG_LICENSE_FILES:=COPYING
 PKG_USE_MIPS16:=0
 
-PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL:=https://github.com/openvswitch/ovs
-PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(PKG_VERSION)
-PKG_SOURCE_VERSION:=22d4614ddf83988a3771fb379ea029e663b4455a
-PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION)-$(PKG_SOURCE_VERSION).tar.gz
+PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+PKG_SOURCE_URL:=http://openvswitch.org/releases/
+PKG_HASH:=e492cf08a929b4a2178b7f9b01dc4ff562f44138b547b4e942078187b2445d2e
+
+PKG_BUILD_DEPENDS:=python/host python-six/host CONFIG_PACKAGE_openvswitch-python
 
 PKG_BUILD_PARALLEL:=1
 PKG_FIXUP:=autoreconf
 PKG_INSTALL:=1
 
-# Upstream package supports kernels between 2.6.32 and 4.3 
-# see https://github.com/openvswitch/ovs/blob/master/FAQ.md
-# This list is pruned to only those kernels used in OpenWRT
-# Support for kernel 4.4 is backported
-SUPPORTED_KERNELS:=LINUX_3_18||LINUX_4_1||LINUX_4_3||LINUX_4_4
-
-# If only kmod-openvswitch is enabled, then override default make path to only
-# build and install the datapath/linux subdirectory which cuts down compilation
-# time dramatically.
-ifeq ($(CONFIG_PACKAGE_openvswitch-base),)
- ifneq ($(CONFIG_PACKAGE_kmod-openvswitch),)
-  MAKE_PATH := datapath/linux
- endif
-endif
-
-# Additionally register PKG_CONFIG_DEPENDS to trigger a rebuild of the code
-# base if the package selection changes.
-PKG_CONFIG_DEPENDS := \
-	CONFIG_PACKAGE_openvswitch-base \
-	CONFIG_PACKAGE_kmod-openvswitch
+SUPPORTED_KERNELS:=LINUX_3_18||LINUX_4_1||LINUX_4_3||LINUX_4_4||LINUX_4_9
 
 include $(INCLUDE_DIR)/package.mk
 $(call include_mk, python-package.mk)
@@ -86,32 +67,11 @@ endef
 define Package/openvswitch-python
   $(call Package/openvswitch/Default)
   TITLE:=Open vSwitch Python Support
-  DEPENDS:=+openvswitch +PACKAGE_openvswitch-python:python
+  DEPENDS:=+openvswitch +PACKAGE_openvswitch-python:python +PACKAGE_openvswitch-python:python-six
 endef
 
 define Package/openvswitch-python/description
   Provides bindings and libraries for using Python to manipulate/work with Open vSwitch.
-endef
-
-define Package/openvswitch-ipsec
-  $(call Package/openvswitch/Default)
-  TITLE:=Open vSwitch GRE through IPsec tool
-  DEPENDS:=+openvswitch-python
-endef
-
-define Package/openvswitch-ipsec/description
-  The ovs-monitor-ipsec script provides support for encrypting GRE tunnels with 
-  IPsec.
-endef
-
-define Package/openvswitch-benchmark
-  $(call Package/openvswitch/Default)
-  TITLE:=Open vSwitch flow setup benchmark utility
-  DEPENDS:=+openvswitch
-endef
-
-define Package/openvswitch-benchmark/description
-  Utility for running OpenVSwitch benchmarking
 endef
 
 OVS_BIN_TOOLS:=ovs-appctl ovs-ofctl ovs-dpctl ovs-vsctl ovsdb-client
@@ -131,10 +91,17 @@ define KernelPackage/openvswitch
   CATEGORY:=Kernel modules
   SUBMENU:=Network Support
   TITLE:=Open vSwitch Kernel Package
-  KCONFIG:=CONFIG_BRIDGE
-  DEPENDS:=+kmod-stp @IPV6 +kmod-gre +kmod-lib-crc32c +kmod-vxlan +kmod-nf-conntrack +kmod-nf-conntrack6 @($(SUPPORTED_KERNELS))
-  FILES:= \
-	$(PKG_BUILD_DIR)/datapath/linux/openvswitch.$(LINUX_KMOD_SUFFIX)
+  KCONFIG:= \
+	CONFIG_BRIDGE \
+	CONFIG_OPENVSWITCH \
+	CONFIG_OPENVSWITCH_GRE=n \
+	CONFIG_OPENVSWITCH_VXLAN=n \
+	CONFIG_OPENVSWITCH_GENEVE=n
+  DEPENDS:= \
+	@IPV6 +kmod-gre +kmod-lib-crc32c +kmod-mpls \
+	+kmod-vxlan +kmod-nf-nat +kmod-nf-nat6  \
+	@($(SUPPORTED_KERNELS))
+  FILES:= $(LINUX_DIR)/net/openvswitch/openvswitch.ko
   AUTOLOAD:=$(call AutoLoad,21,openvswitch)
 endef
 
@@ -151,7 +118,10 @@ CONFIGURE_ARGS += --enable-shared
 TARGET_CFLAGS += -flto -std=gnu99
 
 CONFIGURE_VARS += KARCH=$(LINUX_KARCH)
-MAKE_FLAGS += ARCH="$(LINUX_KARCH)"
+MAKE_FLAGS += \
+	ARCH="$(LINUX_KARCH)" \
+	PYTHONPATH="$(HOST_PYTHONPATH)" \
+	PYTHON="$(HOST_PYTHON_BIN)"
 
 define OvsBinUtility
   define Package/openvswitch-$(1)
@@ -177,10 +147,10 @@ define Package/openvswitch-base/install
 	$(INSTALL_BIN) ./files/etc/init.d/openvswitch.init $(1)/etc/init.d/openvswitch
 
 	$(INSTALL_DIR) $(1)/usr/lib/
-	$(CP) $(PKG_INSTALL_DIR)/usr/lib/libofproto.so*  $(1)/usr/lib/
-	$(CP) $(PKG_INSTALL_DIR)/usr/lib/libopenvswitch.so*  $(1)/usr/lib/
-	$(CP) $(PKG_INSTALL_DIR)/usr/lib/libovsdb.so*  $(1)/usr/lib/
-	$(CP) $(PKG_INSTALL_DIR)/usr/lib/libsflow.so*  $(1)/usr/lib/
+	$(CP) $(PKG_INSTALL_DIR)/usr/lib/libofproto*.so*  $(1)/usr/lib/
+	$(CP) $(PKG_INSTALL_DIR)/usr/lib/libopenvswitch*.so*  $(1)/usr/lib/
+	$(CP) $(PKG_INSTALL_DIR)/usr/lib/libovsdb*.so*  $(1)/usr/lib/
+	$(CP) $(PKG_INSTALL_DIR)/usr/lib/libsflow*.so*  $(1)/usr/lib/
 
 	$(INSTALL_DIR) $(1)/usr/bin/
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/ovsdb-tool $(1)/usr/bin/
@@ -198,16 +168,6 @@ define Package/openvswitch-python/install
 	$(CP) $(PKG_INSTALL_DIR)/usr/share/openvswitch/python/ovs/* $(1)/usr/lib/python$(PYTHON_VERSION)/ovs
 endef
 
-define Package/openvswitch-ipsec/install
-	$(INSTALL_DIR) $(1)/usr/sbin/
-	$(INSTALL_BIN) $(PKG_BUILD_DIR)/debian/ovs-monitor-ipsec $(1)/usr/sbin/
-endef
-
-define Package/openvswitch-benchmark/install
-	$(INSTALL_DIR) $(1)/usr/bin/
-	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/ovs-benchmark $(1)/usr/bin/
-endef
-
 define Package/openvswitch/install
 	:
 endef
@@ -222,8 +182,6 @@ $(foreach t,$(OVS_BIN_TOOLS),$(eval $(call BuildPackage,openvswitch-$(t))))
 
 $(eval $(call BuildPackage,openvswitch-base))
 $(eval $(call BuildPackage,openvswitch-python))
-$(eval $(call BuildPackage,openvswitch-ipsec))
-$(eval $(call BuildPackage,openvswitch-benchmark))
 $(eval $(call BuildPackage,openvswitch))
 $(eval $(call KernelPackage,openvswitch))
 

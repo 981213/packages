@@ -9,14 +9,14 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=mosquitto
-PKG_VERSION:=1.4.10
-PKG_RELEASE:=2
+PKG_VERSION:=1.4.12
+PKG_RELEASE:=1
 PKG_LICENSE:=BSD-3-Clause
 PKG_LICENSE_FILES:=LICENSE.txt
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://mosquitto.org/files/source/
-PKG_MD5SUM:=61839b47b58c5799aab76584f13ed66f
+PKG_HASH:=b12e2353f92cb76882ce7b7bddfea022b461b38cbe6e7fb7c969d0daeb379cf7
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(BUILD_VARIANT)/$(PKG_NAME)-$(PKG_VERSION)
 
 include $(INCLUDE_DIR)/package.mk
@@ -73,8 +73,9 @@ define Package/mosquitto-client/default
     $(Package/mosquitto/default)
     TITLE:= mosquitto - client tools
     DEPENDS+=+libcares
+    PROVIDES:=mosquitto-client
 endef
-define Package/mosquitto-client
+define Package/mosquitto-client-ssl
     $(call Package/mosquitto-client/default)
     TITLE+= (With SSL support)
     DEPENDS+=+libmosquitto-ssl
@@ -92,7 +93,7 @@ define Package/mosquitto-client/default/description
 and subscribing to topics.
 endef
 
-define Package/mosquitto-client/description
+define Package/mosquitto-client-ssl/description
 $(call Package/mosquitto-client/default/description)
         This package is built with SSL support
 endef
@@ -178,12 +179,12 @@ ifeq ($(CONFIG_MOSQUITTO_PASSWD),y)
 endif
 endef
 
-define Package/mosquitto-client/install
+define Package/mosquitto-client-ssl/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/client/mosquitto_pub $(1)/usr/bin/mosquitto_pub
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/client/mosquitto_sub $(1)/usr/bin/mosquitto_sub
 endef
-Package/mosquitto-client-nossl/install = $(Package/mosquitto-client/install)
+Package/mosquitto-client-nossl/install = $(Package/mosquitto-client-ssl/install)
 
 # This installs files into ./staging_dir/. so that you can cross compile from the host
 define Build/InstallDev
@@ -224,5 +225,5 @@ $(eval $(call BuildPackage,mosquitto-nossl))
 $(eval $(call BuildPackage,libmosquitto-ssl))
 $(eval $(call BuildPackage,libmosquitto-nossl))
 $(eval $(call BuildPackage,libmosquittopp))
-$(eval $(call BuildPackage,mosquitto-client))
+$(eval $(call BuildPackage,mosquitto-client-ssl))
 $(eval $(call BuildPackage,mosquitto-client-nossl))

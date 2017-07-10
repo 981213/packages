@@ -8,13 +8,14 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=tor
-PKG_VERSION:=0.2.9.8
+PKG_VERSION:=0.2.9.11
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://dist.torproject.org/ \
 	https://archive.torproject.org/tor-package-archive
-PKG_MD5SUM:=fbdd33d3384574297b88744622382008d1e0f9ddd300d330746c464b7a7d746a
+PKG_MD5SUM:=763ae964e916c2a7a4c5015d351fcf8b
+PKG_HASH:=c1959bebff9a546a54cbedb58c8289a42441991af417d2d16f7b336be8903221
 PKG_MAINTAINER:=Hauke Mehrtens <hauke@hauke-m.de>
 PKG_LICENSE_FILES:=LICENSE
 

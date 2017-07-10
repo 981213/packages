@@ -8,12 +8,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=miniupnpc
-PKG_VERSION:=1.9
+PKG_VERSION:=2.0.20170509
 PKG_RELEASE:=1
 
 PKG_SOURCE_URL:=http://miniupnp.free.fr/files
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
-PKG_MD5SUM:=5ef3ba321e6df72d6519b728b292073e
+PKG_HASH:=d3c368627f5cdfb66d3ebd64ca39ba54d6ff14a61966dbecb8dd296b7039f16a
 PKG_MAINTAINER:=Steven Barth <cyrus@openwrt.org>
 
 PKG_INSTALL:=1
@@ -60,6 +60,7 @@ endef
 define Package/miniupnpc/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/upnpc $(1)/usr/bin/
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/listdevices $(1)/usr/bin/
 endef
 
 define Package/libminiupnpc/install

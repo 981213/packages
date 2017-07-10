@@ -13,7 +13,7 @@ PKG_RELEASE=1
 
 PKG_LICENSE:=GPL-3.0
 PKG_LICENSE_FILES:=LICENSE.txt
-PKG_MAINTAINER:= Ted Hess <thess@kitschensync.net>
+PKG_MAINTAINER:=Ted Hess <thess@kitschensync.net>
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/ralph-irving/squeezelite.git
@@ -128,6 +128,7 @@ TARGET_LDFLAGS+= -lasound -lpthread -lm -lrt
 
 ifeq ($(BUILD_VARIANT),full)
     TARGET_CFLAGS+= -DLINKALL
+    TARGET_LDFLAGS+= -lvorbis -logg
 endif
 
 define Package/squeezelite/install

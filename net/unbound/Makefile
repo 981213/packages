@@ -8,8 +8,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=unbound
-PKG_VERSION:=1.6.0
-PKG_RELEASE:=2
+PKG_VERSION:=1.6.4
+PKG_RELEASE:=1
 
 PKG_LICENSE:=BSD-3-Clause
 PKG_LICENSE_FILES:=LICENSE
@@ -17,7 +17,7 @@ PKG_MAINTAINER:=Eric Luehrsen <ericluehrsen@hotmail.com>
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=http://www.unbound.net/downloads
-PKG_MD5SUM:=78409eccf7260d260b6463f85e59c66b
+PKG_HASH:=df0a88816ec31ccb8284c9eb132e1166fbf6d9cde71fbc4b8cd08a91ee777fed
 
 PKG_BUILD_DEPENDS:=libexpat
 PKG_BUILD_PARALLEL:=1
@@ -27,7 +27,7 @@ PKG_INSTALL:=1
 include $(INCLUDE_DIR)/package.mk
 
 define Package/unbound/Default
-  TITLE:=Unbound is a validating, recursive, and caching DNS resolver.
+  TITLE:=Validating Recursive DNS Server
   URL:=http://www.unbound.net/
   DEPENDS:=+libopenssl
 endef
@@ -51,7 +51,7 @@ define Package/unbound-anchor
   SECTION:=net
   CATEGORY:=Network
   SUBMENU:=IP Addresses and Names
-  TITLE+= (anchor utility)
+  TITLE+= (DSKEY utility)
   DEPENDS+= +unbound +libexpat
 endef
 
@@ -77,7 +77,7 @@ define Package/unbound-control-setup
   SECTION:=net
   CATEGORY:=Network
   SUBMENU:=IP Addresses and Names
-  TITLE+= (control setup utility)
+  TITLE+= (control setup)
   DEPENDS+= +unbound-control +openssl-util
 endef
 
@@ -90,7 +90,7 @@ define Package/unbound-host
   SECTION:=net
   CATEGORY:=Network
   SUBMENU:=IP Addresses and Names
-  TITLE+= (DNS lookup utility)
+  TITLE+= (lookup utility)
   DEPENDS+= +libunbound
 endef
 
@@ -122,6 +122,8 @@ CONFIGURE_ARGS += \
 define Package/unbound/conffiles
 /etc/config/unbound
 /etc/unbound/unbound.conf
+/etc/unbound/unbound_ext.conf
+/etc/unbound/unbound_srv.conf
 endef
 
 define Build/InstallDev
@@ -142,15 +144,17 @@ define Package/unbound/install
 		$(PKG_INSTALL_DIR)/etc/unbound/unbound.conf \
 		$(1)/etc/unbound/unbound.conf
 	$(INSTALL_DATA) ./files/root.key $(1)/etc/unbound/root.key
+	$(INSTALL_DATA) ./files/unbound_ext.conf $(1)/etc/unbound/unbound_ext.conf
+	$(INSTALL_DATA) ./files/unbound_srv.conf $(1)/etc/unbound/unbound_srv.conf
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_DATA) ./files/unbound.uci $(1)/etc/config/unbound
-	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
-	$(INSTALL_BIN) ./files/unbound.iface $(1)/etc/hotplug.d/iface/25-unbound
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/ntp
-	$(INSTALL_BIN) ./files/unbound.ntpd $(1)/etc/hotplug.d/ntp/25-unbound
+	$(INSTALL_BIN)  ./files/unbound.ntpd $(1)/etc/hotplug.d/ntp/25-unbound
 	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_BIN) ./files/unbound.init $(1)/etc/init.d/unbound
+	$(INSTALL_BIN)  ./files/unbound.init $(1)/etc/init.d/unbound
 	$(INSTALL_DIR) $(1)/usr/lib/unbound
+	$(INSTALL_BIN)  ./files/odhcpd.sh $(1)/usr/lib/unbound/odhcpd.sh
+	$(INSTALL_DATA) ./files/odhcpd.awk $(1)/usr/lib/unbound/odhcpd.awk
 	$(INSTALL_DATA) ./files/dnsmasq.sh $(1)/usr/lib/unbound/dnsmasq.sh
 	$(INSTALL_DATA) ./files/iptools.sh $(1)/usr/lib/unbound/iptools.sh
 	$(INSTALL_DATA) ./files/rootzone.sh $(1)/usr/lib/unbound/rootzone.sh
@@ -188,3 +192,4 @@ $(eval $(call BuildPackage,unbound-control))
 $(eval $(call BuildPackage,unbound-control-setup))
 $(eval $(call BuildPackage,unbound-host))
 $(eval $(call BuildPackage,libunbound))
+

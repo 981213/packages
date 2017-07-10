@@ -8,48 +8,63 @@ To avoid these kind of deadlocks, travelmate set all station interfaces in an "a
 ## Main Features
 * STA interfaces operating in an "always off" mode, to make sure that the AP is always accessible
 * easy setup within normal OpenWrt/LEDE environment
+* strong LuCI-Support to simplify the interface setup
 * fast uplink connections
-* procd init system support
-* procd based hotplug support, the travelmate start will be triggered by interface triggers
+* manual / automatic mode support, the latter one checks the existing uplink connection regardless of ifdown event trigger actions every n seconds
+* support of devices with multiple radios
+* procd init and hotplug support
+* runtime information available via LuCI & via 'status' init command
 * status & debug logging to syslog
 
 ## Prerequisites
-* [OpenWrt](https://openwrt.org) or [LEDE](https://www.lede-project.org) trunk
-* iw (default) or iwinfo for wlan scanning
+* [LEDE](https://www.lede-project.org) 17.01 or latest snapshot
+* iwinfo for wlan scanning
 
-## OpenWrt / LEDE trunk Installation & Usage
+## LEDE trunk Installation & Usage
 * download the package [here](https://downloads.lede-project.org/snapshots/packages/x86_64/packages)
 * install 'travelmate' (_opkg install travelmate_)
-* configure your network to support (multiple) wlan uplinks and set travelmate config options (details see below)
-* set 'trm\_enabled' option in travelmate config to '1'
-* travelmate starts automatically during boot and will be triggered by procd interface triggers
+* configure your network:
+    * automatic: use the LuCI frontend with automatic STA interface setup, that's the recommended way
+    * manual: see detailed configure steps below
+    * at least you need one configured AP and one STA interface
 
 ## LuCI travelmate companion package
 * download the package [here](https://downloads.lede-project.org/snapshots/packages/x86_64/luci)
 * install 'luci-app-travelmate' (_opkg install luci-app-travelmate_)
 * the application is located in LuCI under 'Services' menu
-* _Thanks to Hannu Nyman for this great LuCI frontend!_
-
-## Chaos Calmer installation notes
-* 'travelmate' and 'luci-app-travelmate' are _not_ available as ipk packages in the Chaos Calmer download repository
-* download the packages from a development snapshot directory (see download links above)
-* manually transfer the packages to your routers temp directory (with tools like _sshfs_ or _winscp_)
-* install the packages as described above
 
 ## Travelmate config options
 * travelmate config options:
     * trm\_enabled => main switch to enable/disable the travelmate service (default: '0', disabled)
     * trm\_debug => enable/disable debug logging (default: '0', disabled)
-    * trm\_maxwait => how long (in seconds) should travelmate wait for wlan interface reload action (default: '20')
+    * trm\_automatic => keep travelmate in an active state (default: '1', enabled)
+    * trm\_maxwait => how long (in seconds) should travelmate wait for a successful wlan interface reload action (default: '30')
     * trm\_maxretry => how many times should travelmate try to find an uplink after a trigger event (default: '3')
-    * trm\_iw => set this option to '0' to use iwinfo for wlan scanning (default: '1', use iw)
-    * trm\_iface => restrict the procd interface trigger to a (list of) certain wan interface(s) or disable it at all (default: not set, disabled)
+    * trm\_timeout => timeout in seconds for "automatic mode" (default: '60')
+    * trm\_radio => limit travelmate to a dedicated radio, e.g. 'radio0' (default: not set, use all radios)
+    * trm\_iface => restrict the procd interface trigger to a (list of) certain wan interface(s) or disable it at all (default: trm_wwan)
+    * trm\_triggerdelay => additional trigger delay in seconds before travelmate processing starts (default: '1')
 
-## Setup
-**1. configure a wwan interface in /etc/config/network:**
+## Runtime information
+
+**receive travelmate runtime information:**
+<pre><code>
+root@adb2go:~# /etc/init.d/travelmate status
+::: travelmate runtime information
+ travelmate_version : 0.7.2
+ station_connection : true
+ station_ssid       : blackhole
+ station_interface  : trm_wwan
+ station_radio      : radio1
+ last_rundate       : 06.05.2017 06:58:22
+ system             : LEDE Reboot SNAPSHOT r4051-3ddc1914ba
+</code></pre>
+
+## Manual Setup
+**1. configure the travelmate wwan interface in /etc/config/network:**
 <pre><code>
 [...]
-config interface 'wwan'
+config interface 'trm_wwan'
         option proto 'dhcp'
 [...]
 </code></pre>
@@ -59,22 +74,16 @@ config interface 'wwan'
 [...]
 config zone
         option name 'wan'
-        option input 'REJECT'
-        option output 'ACCEPT'
-        option forward 'REJECT'
-        option masq '1'
-        option mtu_fix '1'
-        option network 'wan wan6 wwan'
+        option network 'wan wan6 trm_wwan'
 [...]
 </code></pre>
 
-**3. add required ap and wwan stations to your wireless configuration in etc/config/wireless:**
+**3. at least add one ap and (multiple) wwan stations to your wireless configuration in etc/config/wireless:**
 <pre><code>
 [...]
 config wifi-iface
         option device 'radio0'
         option network 'lan'
-        option ifname 'wlan0'
         option mode 'ap'
         option ssid 'example_ap'
         option encryption 'psk2+ccmp'
@@ -83,28 +92,25 @@ config wifi-iface
 [...]
 config wifi-iface
         option device 'radio0'
-        option network 'wwan'
+        option network 'trm_wwan'
         option mode 'sta'
         option ssid 'example_01'
-        option ifname 'wwan01'
         option encryption 'psk2+ccmp'
         option key 'abc'
         option disabled '1'
 config wifi-iface
         option device 'radio0'
-        option network 'wwan'
+        option network 'trm_wwan'
         option mode 'sta'
         option ssid 'example_02'
-        option ifname 'wwan02'
         option encryption 'psk2+ccmp'
         option key 'xyz'
         option disabled '1'
 config wifi-iface
         option device 'radio0'
-        option network 'wwan'
+        option network 'trm_wwan'
         option mode 'sta'
         option ssid 'example_03'
-        option ifname 'wwan03'
         option encryption 'none'
         option disabled '1'
 [...]

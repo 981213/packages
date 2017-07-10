@@ -1,11 +1,13 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=gnunet
-PKG_SOURCE_VERSION:=a4295da3df82817ff2fe1fa547374a96a2e0280b
-PKG_VERSION:=0.10.2-git-20170111-$(PKG_SOURCE_VERSION)
+PKG_SOURCE_VERSION:=556ccd6d483b3678867c3829e6979c307df04450
+PKG_MIRROR_HASH:=5ecf15575eccc30135b2dc9871d88de0b32b593dc79cf5b0632a4fe2ffd711df
+
+PKG_VERSION:=0.10.2-git-20170626-$(PKG_SOURCE_VERSION)
 PKG_RELEASE:=1
 
-PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.xz
 PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(PKG_VERSION)
 PKG_SOURCE_URL:=https://gnunet.org/git/gnunet.git
 PKG_SOURCE_PROTO:=git
@@ -30,7 +32,6 @@ CONFIGURE_ARGS+= \
 	$(if $(CONFIG_PACKAGE_libsqlite3),--with-sqlite="$(STAGING_DIR)/usr",--without-sqlite) \
 	--disable-testing \
 	--disable-testruns \
-	--disable-wachs \
 	--enable-experimental \
 	--with-extractor=$(STAGING_DIR)/usr \
 	--with-gnutls=$(STAGING_DIR)/usr \
@@ -137,14 +138,14 @@ define Package/gnunet/install
 		$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/gnunet-$$$$bin $(1)/usr/bin/ ; \
 	done )
 
-	( for lib in arm ats block cadet core datacache dht \
+	( for lib in arm ats block blockgroup cadet core datacache dht \
 	    dns dnsparser fragmentation friends hello identity natauto natnew nse \
 	    peerinfo regexblock regex revocation scalarproduct set \
 	    statistics transport util; do \
 		$(CP) $(PKG_INSTALL_DIR)/usr/lib/libgnunet$$$$lib.so* $(1)/usr/lib/ ; \
 	done )
 
-	( for plug in ats_proportional block_dht block_regex   \
+	( for plug in ats_proportional block_dht block_regex block_revocation  \
 	    transport_tcp transport_udp transport_unix; do \
 		$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/lib/gnunet/libgnunet_plugin_$$$$plug*.so $(1)/usr/lib/gnunet ; \
 	done )
@@ -191,6 +192,9 @@ PLUGIN_conversation:=gnsrecord_conversation
 LIBEXEC_conversation:=helper-audio-playback helper-audio-record service-conversation
 CONF_conversation:=conversation
 
+BIN_dht-cli:=dht-get dht-put dht-monitor
+PLUGIN_dht-cli:=block_test
+
 DEPENDS_hostlist:=+libmicrohttpd +libgnurl +ca-certificates
 LIBEXEC_hostlist:=daemon-hostlist
 CONF_hostlist:=hostlist
@@ -206,7 +210,6 @@ LIBEXEC_transport-wlan:=helper-transport-wlan
 
 DEPENDS_experiments:=+libglpk
 PLUGIN_experiments:=ats_mlp ats_ril
-LIBEXEC_experiments:=service-dht-whanau service-dht-xvine
 
 # BIN_dv:=dv
 LIB_dv:=dv
@@ -262,6 +265,7 @@ BIN_social:=identity-token multicast social
 LIB_social:=consensus identityprovider multicast psyc psycstore psycutil secretsharing social
 LIBEXEC_social:=service-consensus service-evil-consensus service-identity-provider service-multicast service-psyc service-psycstore service-secretsharing service-social
 CONF_social:=consensus multicast psyc psycstore secretsharing social
+PLUGINS_social:=block_consensus
 
 PLUGIN_dhtcache-heap:=datacache_heap
 CONFLICTS_dhtcache-heap:=gnunet-dhtcache-pgsql gnunet-dhtcache-sqlite
@@ -288,7 +292,7 @@ PLUGIN_fs-mysql:=datastore_mysql
 CONFLICTS_fs-mysql:=gnunet-fs-pgsql gnunet-fs-sqlite
 
 DEPENDS_pgsql:=+libpq
-LIB_pgsql:=postgres pq
+LIB_pgsql:=pq
 
 DEPENDS_dhtcache-pgsql:=+gnunet-pgsql
 PLUGIN_dhtcache-pgsql:=datacache_postgres
@@ -306,21 +310,24 @@ DEPENDS_social-pgsql:=+gnunet-pgsql +gnunet-social
 PLUGIN_social-pgsql:=psycstore_postgres
 CONFLICTS_social-pgsql:=gnunet-social-sqlite gnunet-social-mysql
 
-DEPENDS_gns-sqlite:=+libsqlite3 +gnunet-gns
+DEPENDS_sqlite:=+libsqlite3
+LIB_sqlite:=sq
+
+DEPENDS_gns-sqlite:=+gnunet-gns +gnunet-sqlite
 PLUGIN_gns-sqlite:=namecache_sqlite namestore_sqlite
 CONFLICTS_gns-sqlite:=gnunet-gns-flat
 
-DEPENDS_peerstore-sqlite:=+libsqlite3 +gnunet-peerstore
+DEPENDS_peerstore-sqlite:=+gnunet-peerstore +gnunet-sqlite
 PLUGIN_peerstore-sqlite:=peerstore_sqlite
 CONFLICTS_peerstore-sqlite:=gnunet-peerstore-flat
 
-DEPENDS_dhtcache-sqlite:=+libsqlite3
+DEPENDS_dhtcache-sqlite:=+gnunet-sqlite
 PLUGIN_dhtcache-sqlite:=datacache_sqlite
 
-DEPENDS_fs-sqlite:=+libsqlite3 +gnunet-datastore
+DEPENDS_fs-sqlite:=+gnunet-datastore +gnunet-sqlite
 PLUGIN_fs-sqlite:=datastore_sqlite
 
-DEPENDS_social-sqlite:=+libsqlite3 +gnunet-social
+DEPENDS_social-sqlite:=+gnunet-social  +gnunet-sqlite
 PLUGIN_social-sqlite:=psycstore_sqlite
 
 DEPENDS_transport-bluetooth:=+bluez-libs
@@ -384,7 +391,8 @@ $(eval $(call PostInstFixSUIDPerms,gnunet-vpn))
 $(eval $(call BuildPackage,gnunet))
 $(eval $(call BuildComponent,conversation,conversation component,))
 $(eval $(call BuildComponent,datastore,data storage components,))
-$(eval $(call BuildComponent,dv,distance-vector routing component,y))
+$(eval $(call BuildComponent,dht-cli,DHT command line clients,))
+# $(eval $(call BuildComponent,dv,distance-vector routing component,y))
 $(eval $(call BuildComponent,experiments,experimental components,))
 $(eval $(call BuildComponent,fs,file-sharing components,))
 $(eval $(call BuildComponent,gns,name resolution components,y))
@@ -399,14 +407,15 @@ $(eval $(call BuildComponent,dhtcache-heap,heap-based dhtcache plugin,y))
 $(eval $(call BuildComponent,fs-heap,heap-based filesharing plugin,))
 $(eval $(call BuildComponent,gns-flat,flat storage GNS plugins,y))
 $(eval $(call BuildComponent,peerstore-flat,flat storage peerstore plugin,))
-$(eval $(call BuildComponent,mysql,mySQL datastore backend,))
+$(eval $(call BuildComponent,mysql,mySQL backend,))
 $(eval $(call BuildComponent,fs-mysql,mySQL filesharing plugins,))
 $(eval $(call BuildComponent,social-mysql,mySQL social plugins,))
-$(eval $(call BuildComponent,pgsql,PostgreSQL storage backends,))
+$(eval $(call BuildComponent,pgsql,PostgreSQL backend,))
 $(eval $(call BuildComponent,dhtcache-pgsql,PostgreSQL dhtcache plugin,))
 $(eval $(call BuildComponent,fs-pgsql,PostgreSQL filesharing plugin,))
 $(eval $(call BuildComponent,gns-pgsql,PostgreSQL GNS plugins,))
 $(eval $(call BuildComponent,social-pgsql,PostgreSQL social plugin,))
+$(eval $(call BuildComponent,sqlite,libsqlite3 backend,))
 $(eval $(call BuildComponent,dhtcache-sqlite,libsqlite3 dhtcache plugin,))
 $(eval $(call BuildComponent,fs-sqlite,libsqlite3 filesharing plugin,))
 $(eval $(call BuildComponent,gns-sqlite,libsqlite3 gns plugins,))

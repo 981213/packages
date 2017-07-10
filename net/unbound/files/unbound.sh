@@ -14,20 +14,22 @@
 #
 ##############################################################################
 #
-# This builds the basic UCI components currently supported for Unbound. It is
-# intentionally NOT comprehensive and bundles a lot of options. The UCI is to
-# be a simpler presentation of the total Unbound conf set.
+# Unbound is a full featured recursive server with many options. The UCI
+# provided tries to simplify and bundle options. This should make Unbound
+# easier to deploy. Even light duty routers may resolve recursively instead of
+# depending on a stub with the ISP. The UCI also attempts to replicate dnsmasq
+# features as used in base LEDE/OpenWrt. If there is a desire for more
+# detailed tuning, then manual conf file overrides are also made available.
 #
 ##############################################################################
 
 UNBOUND_B_CONTROL=0
-UNBOUND_B_DNSMASQ=0
+UNBOUND_B_SLAAC6_MAC=0
 UNBOUND_B_DNSSEC=0
 UNBOUND_B_DNS64=0
 UNBOUND_B_GATE_NAME=0
 UNBOUND_B_HIDE_BIND=1
 UNBOUND_B_LOCL_BLCK=0
-UNBOUND_B_LOCL_NAME=0
 UNBOUND_B_LOCL_SERV=1
 UNBOUND_B_MAN_CONF=0
 UNBOUND_B_NTP_BOOT=1
@@ -35,35 +37,54 @@ UNBOUND_B_PRIV_BLCK=1
 UNBOUND_B_QUERY_MIN=0
 UNBOUND_B_QRY_MINST=0
 
-UNBOUND_IP_DNS64="64:ff9b::/96"
-
+UNBOUND_D_DOMAIN_TYPE=static
+UNBOUND_D_DHCP_LINK=none
+UNBOUND_D_EXTRA_DNS=0
+UNBOUND_D_LAN_FQDN=0
+UNBOUND_D_PROTOCOL=mixed
 UNBOUND_D_RESOURCE=small
 UNBOUND_D_RECURSION=passive
-UNBOUND_D_PROTOCOL=mixed
+UNBOUND_D_WAN_FQDN=0
 
-UNBOUND_TXT_FWD_ZONE=""
-UNBOUND_TTL_MIN=120
+UNBOUND_IP_DNS64="64:ff9b::/96"
 
 UNBOUND_N_EDNS_SIZE=1280
 UNBOUND_N_FWD_PORTS=""
 UNBOUND_N_RX_PORT=53
-UNBOUND_N_ROOT_AGE=28
+UNBOUND_N_ROOT_AGE=9
+
+UNBOUND_TTL_MIN=120
+
+UNBOUND_TXT_DOMAIN=lan
+UNBOUND_TXT_FWD_ZONE=""
+UNBOUND_TXT_HOSTNAME=thisrouter
 
 ##############################################################################
 
-UNBOUND_ANCHOR=/usr/bin/unbound-anchor
-UNBOUND_CONTROL=/usr/bin/unbound-control
+# keep track of local-domain: assignments during inserted resource records
+UNBOUND_LIST_DOMAINS=""
+
+##############################################################################
 
 UNBOUND_LIBDIR=/usr/lib/unbound
+UNBOUND_VARDIR=/var/lib/unbound
 
 UNBOUND_PIDFILE=/var/run/unbound.pid
 
-UNBOUND_VARDIR=/var/lib/unbound
+UNBOUND_SRV_CONF=$UNBOUND_VARDIR/unbound_srv.conf
+UNBOUND_EXT_CONF=$UNBOUND_VARDIR/unbound_ext.conf
+UNBOUND_DHCP_CONF=$UNBOUND_VARDIR/unbound_dhcp.conf
 UNBOUND_CONFFILE=$UNBOUND_VARDIR/unbound.conf
+
 UNBOUND_KEYFILE=$UNBOUND_VARDIR/root.key
 UNBOUND_HINTFILE=$UNBOUND_VARDIR/root.hints
-UNBOUND_TIMEFILE=$UNBOUND_VARDIR/unbound.time
-UNBOUND_CHECKFILE=$UNBOUND_VARDIR/unbound.check
+UNBOUND_TIMEFILE=$UNBOUND_VARDIR/hotplug.time
+
+##############################################################################
+
+UNBOUND_ANCHOR=/usr/sbin/unbound-anchor
+UNBOUND_CONTROL=/usr/sbin/unbound-control
+UNBOUND_CONTROL_CFG="$UNBOUND_CONTROL -c $UNBOUND_CONFFILE"
 
 ##############################################################################
 
@@ -73,6 +94,270 @@ UNBOUND_CHECKFILE=$UNBOUND_VARDIR/unbound.check
 . $UNBOUND_LIBDIR/dnsmasq.sh
 . $UNBOUND_LIBDIR/iptools.sh
 . $UNBOUND_LIBDIR/rootzone.sh
+
+##############################################################################
+
+copy_dash_update() {
+  # TODO: remove this function and use builtins when this issues is resovled.
+  # Due to OpenWrt/LEDE divergence "cp -u" isn't yet universally available.
+  local filetime keeptime
+
+
+  if [ -f $UNBOUND_KEYFILE.keep ] ; then
+    # root.key.keep is reused if newest
+    filetime=$( date -r $UNBOUND_KEYFILE +%s )
+    keeptime=$( date -r $UNBOUND_KEYFILE.keep +%s )
+
+
+    if [ $keeptime -gt $filetime ] ; then
+      cp $UNBOUND_KEYFILE.keep $UNBOUND_KEYFILE
+    fi
+
+
+    rm -f $UNBOUND_KEYFILE.keep
+  fi
+}
+
+##############################################################################
+
+create_interface_dns() {
+  local cfg="$1"
+  local ipcommand logint ignore ifname ifdashname
+  local name names address addresses
+  local ulaprefix if_fqdn host_fqdn mode mode_ptr
+
+  # Create local-data: references for this hosts interfaces (router).
+  config_get logint "$cfg" interface
+  config_get_bool ignore "$cfg" ignore 0
+  network_get_device ifname "$cfg"
+
+  ifdashname="${ifname//./-}"
+  ipcommand="ip -o address show $ifname"
+  addresses=$( $ipcommand | awk '/inet/{sub(/\/.*/,"",$4); print $4}' )
+  ulaprefix=$( uci_get network.@globals[0].ula_prefix )
+  host_fqdn="$UNBOUND_TXT_HOSTNAME.$UNBOUND_TXT_DOMAIN"
+  if_fqdn="$ifdashname.$host_fqdn"
+
+
+  if [ -z "${ulaprefix%%:/*}" ] ; then
+    # Nonsense so this option isn't globbed below
+    ulaprefix="fdno:such:addr::/48"
+  fi
+
+
+  if [ "$ignore" -gt 0 ] ; then
+    mode="$UNBOUND_D_WAN_FQDN"
+  else
+    mode="$UNBOUND_D_LAN_FQDN"
+  fi
+
+
+  case "$mode" in
+  3)
+    mode_ptr="$host_fqdn"
+    names="$host_fqdn  $UNBOUND_TXT_HOSTNAME"
+    ;;
+
+  4)
+    if [ -z "$ifdashname" ] ; then
+      # race conditions at init can rarely cause a blank device return
+      # the record format is invalid and Unbound won't load the conf file
+      mode_ptr="$host_fqdn"
+      names="$host_fqdn  $UNBOUND_TXT_HOSTNAME"
+    else
+      mode_ptr="$if_fqdn"
+      names="$if_fqdn  $host_fqdn  $UNBOUND_TXT_HOSTNAME"
+    fi
+    ;;
+
+  *)
+    mode_ptr="$UNBOUND_TXT_HOSTNAME"
+    names="$UNBOUND_TXT_HOSTNAME"
+    ;;
+  esac
+
+
+  if [ "$mode" -gt 1 ] ; then
+    {
+      for address in $addresses ; do
+        case $address in
+        fe80:*|169.254.*)
+          echo "  # note link address $address"
+          ;;
+
+        [1-9a-f]*:*[0-9a-f])
+          # GA and ULA IP6 for HOST IN AAA records (ip command is robust)
+          for name in $names ; do
+            echo "  local-data: \"$name. 120 IN AAAA $address\""
+          done
+          echo "  local-data-ptr: \"$address 120 $mode_ptr\""
+          ;;
+
+        [1-9]*.*[0-9])
+          # Old fashioned HOST IN A records
+          for name in $names ; do
+            echo "  local-data: \"$name. 120 IN A $address\""
+          done
+          echo "  local-data-ptr: \"$address 120 $mode_ptr\""
+          ;;
+        esac
+      done
+      echo
+    } >> $UNBOUND_CONFFILE
+
+  elif [ "$mode" -gt 0 ] ; then
+    {
+      for address in $addresses ; do
+        case $address in
+        fe80:*|169.254.*)
+          echo "  # note link address $address"
+          ;;
+
+        "${ulaprefix%%:/*}"*)
+          # Only this networks ULA and only hostname
+          echo "  local-data: \"$UNBOUND_TXT_HOSTNAME. 120 IN AAAA $address\""
+          echo "  local-data-ptr: \"$address 120 $UNBOUND_TXT_HOSTNAME\""
+          ;;
+
+        [1-9]*.*[0-9])
+          echo "  local-data: \"$UNBOUND_TXT_HOSTNAME. 120 IN A $address\""
+          echo "  local-data-ptr: \"$address 120 $UNBOUND_TXT_HOSTNAME\""
+          ;;
+        esac
+      done
+      echo
+    } >> $UNBOUND_CONFFILE
+  fi
+}
+
+##############################################################################
+
+create_local_zone() {
+  local target="$1"
+  local partial domain found
+
+
+  if [ -n "$UNBOUND_LIST_DOMAINS" ] ; then
+    for domain in $UNBOUND_LIST_DOMAINS ; do
+      case $target in
+      *"${domain}")
+        found=1
+        break
+        ;;
+
+      [A-Za-z0-9]*.[A-Za-z0-9]*)
+        found=0
+        ;;
+
+      *) # no dots
+        found=1
+        break
+        ;;
+      esac
+    done
+  else
+    found=0
+  fi
+
+
+  if [ $found -eq 0 ] ; then
+    # New Zone! Bundle local-zones: by first two name tiers "abcd.tld."
+    partial=$( echo "$target" | awk -F. '{ j=NF ; i=j-1; print $i"."$j }' )
+    UNBOUND_LIST_DOMAINS="$UNBOUND_LIST_DOMAINS $partial"
+    echo "  local-zone: $partial. transparent" >> $UNBOUND_CONFFILE
+  fi
+}
+
+##############################################################################
+
+create_host_record() {
+  local cfg="$1"
+  local ip name
+
+  # basefiles dhcp "domain" clause which means host A, AAAA, and PRT record
+  config_get ip   "$cfg" ip
+  config_get name "$cfg" name
+
+
+  if [ -n "$name" -a -n "$ip" ] ; then
+    create_local_zone "$name"
+
+    {
+      case $ip in
+      fe80:*|169.254.*)
+        echo "  # note link address $ip for host $name"
+        ;;
+
+      [1-9a-f]*:*[0-9a-f])
+        echo "  local-data: \"$name. 120 IN AAAA $ip\""
+        echo "  local-data-ptr: \"$ip 120 $name\""
+        ;;
+
+      [1-9]*.*[0-9])
+        echo "  local-data: \"$name. 120 IN A $ip\""
+        echo "  local-data-ptr: \"$ip 120 $name\""
+        ;;
+      esac
+    } >> $UNBOUND_CONFFILE
+  fi
+}
+
+##############################################################################
+
+create_mx_record() {
+  local cfg="$1"
+  local domain relay pref
+
+  # Insert a static MX record
+  config_get domain "$cfg" domain
+  config_get relay  "$cfg" relay
+  config_get pref   "$cfg" pref 10
+
+
+  if [ -n "$domain" -a -n "$relay" ] ; then
+    create_local_zone "$domain"
+    echo "  local-data: \"$domain. 120 IN MX $pref $relay.\"" \
+          >> $UNBOUND_CONFFILE
+  fi
+}
+
+##############################################################################
+
+create_srv_record() {
+  local cfg="$1"
+  local srv target port class weight
+
+  # Insert a static SRV record such as SIP server
+  config_get srv    "$cfg" srv
+  config_get target "$cfg" target
+  config_get port   "$cfg" port
+  config_get class  "$cfg" class 10
+  config_get weight "$cfg" weight 10
+
+
+  if [ -n "$srv" -a -n "$target" -a -n "$port" ] ; then
+    create_local_zone "$srv"
+    echo "  local-data: \"$srv. 120 IN SRV $class $weight $port $target.\"" \
+          >> $UNBOUND_CONFFILE
+  fi
+}
+
+##############################################################################
+
+create_cname_record() {
+  local cfg="$1"
+  local cname target
+
+  # Insert static CNAME record
+  config_get cname  "$cfg" cname
+  config_get target "$cfg" target
+
+
+  if [ -n "$cname" -a -n "$target" ] ; then
+    create_local_zone "$cname"
+    echo "  local-data: \"$cname. 120 IN CNAME $target.\"" >> $UNBOUND_CONFFILE
+  fi
+}
 
 ##############################################################################
 
@@ -109,55 +394,80 @@ create_domain_insecure() {
 ##############################################################################
 
 unbound_mkdir() {
+  local dhcp_origin=$( uci_get dhcp.@odhcpd[0].leasefile )
+  local dhcp_dir=$( dirname $dhcp_origin )
+  local filestuff
+
+
+  if [ "$UNBOUND_D_DHCP_LINK" = "odhcpd" -a ! -d "$dhcp_dir" ] ; then
+    # make sure odhcpd has a directory to write (not done itself, yet)
+    mkdir -p "$dhcp_dir"
+  fi
+
+
+  if [ -f $UNBOUND_KEYFILE ] ; then
+    filestuff=$( cat $UNBOUND_KEYFILE )
+
+
+    case "$filestuff" in
+      *"state=2 [  VALID  ]"*)
+        # Lets not lose RFC 5011 tracking if we don't have to
+        cp -p $UNBOUND_KEYFILE $UNBOUND_KEYFILE.keep
+        ;;
+    esac
+  fi
+
+
+  # Blind copy /etc/ to /var/lib/
   mkdir -p $UNBOUND_VARDIR
+  rm -f $UNBOUND_VARDIR/dhcp_*
   touch $UNBOUND_CONFFILE
+  touch $UNBOUND_SRV_CONF
+  touch $UNBOUND_EXT_CONF
+  cp -p /etc/unbound/* $UNBOUND_VARDIR/
 
 
-  if [ -f /etc/unbound/root.hints ] ; then
-    # Your own local copy of root.hints
-    cp -p /etc/unbound/root.hints $UNBOUND_HINTFILE
+  if [ ! -f $UNBOUND_HINTFILE ] ; then
+    if [ -f /usr/share/dns/root.hints ] ; then
+      # Debian-like package dns-root-data
+      cp -p /usr/share/dns/root.hints $UNBOUND_HINTFILE
 
-  elif [ -f /usr/share/dns/root.hints ] ; then
-    # Debian-like package dns-root-data
-    cp -p /usr/share/dns/root.hints $UNBOUND_HINTFILE
-
-  else
-    logger -t unbound -s "iterator will use built-in root hints"
+    elif [ ! -f "$UNBOUND_TIMEFILE" ] ; then
+      logger -t unbound -s "iterator will use built-in root hints"
+    fi
   fi
 
 
-  if [ -f /etc/unbound/root.key ] ; then
-    # Your own local copy of a root.key
-    cp -p /etc/unbound/root.key $UNBOUND_KEYFILE
+  if [ ! -f $UNBOUND_KEYFILE ] ; then
+    if [ -f /usr/share/dns/root.key ] ; then
+      # Debian-like package dns-root-data
+      cp -p /usr/share/dns/root.key $UNBOUND_KEYFILE
 
-  elif [ -f /usr/share/dns/root.key ] ; then
-    # Debian-like package dns-root-data
-    cp -p /usr/share/dns/root.key $UNBOUND_KEYFILE
+    elif [ -x $UNBOUND_ANCHOR ] ; then
+      $UNBOUND_ANCHOR -a $UNBOUND_KEYFILE
 
-  elif [ -x "$UNBOUND_ANCHOR" ] ; then
-    $UNBOUND_ANCHOR -a $UNBOUND_KEYFILE
-
-  else
-    logger -t unbound -s "validator will use built-in trust anchor"
+    elif [ ! -f "$UNBOUND_TIMEFILE" ] ; then
+      logger -t unbound -s "validator will use built-in trust anchor"
+    fi
   fi
+
+
+  copy_dash_update
+
+
+  # Ensure access and prepare to jail
+  chown -R unbound:unbound $UNBOUND_VARDIR
+  chmod 775 $UNBOUND_VARDIR
+  chmod 664 $UNBOUND_VARDIR/*
 }
 
 ##############################################################################
 
-unbound_conf() {
-  local cfg=$1
-  local rt_mem rt_conn modulestring
-
-  {
-    # Make fresh conf file
-    echo "# $UNBOUND_CONFFILE generated by UCI $( date )"
-    echo
-  } > $UNBOUND_CONFFILE
-
-
+unbound_control() {
   if [ "$UNBOUND_B_CONTROL" -gt 0 ] ; then
     {
       # Enable remote control tool, but only at local host for security
+      # You can hand write fancier encrypted access with /etc/..._ext.conf
       echo "remote-control:"
       echo "  control-enable: yes"
       echo "  control-use-cert: no"
@@ -165,16 +475,30 @@ unbound_conf() {
       echo "  control-interface: ::1"
       echo
     } >> $UNBOUND_CONFFILE
-
-  else
-    {
-      # "control:" clause is seperate before "server:" so we can append
-      # dnsmasq "server:" parts and "forward:" cluases towards the end.
-      echo "remote-control:"
-      echo "  control-enable: no"
-      echo
-    } >> $UNBOUND_CONFFILE
   fi
+
+
+  {
+    # Amend your own extended clauses here like forward zones or disable
+    # above (local, no encryption) and amend your own remote encrypted control
+    echo
+    echo "include: $UNBOUND_EXT_CONF" >> $UNBOUND_CONFFILE
+    echo
+  } >> $UNBOUND_CONFFILE
+}
+
+##############################################################################
+
+unbound_conf() {
+  local cfg="$1"
+  local rt_mem rt_conn modulestring
+
+
+  {
+    # Make fresh conf file
+    echo "# $UNBOUND_CONFFILE generated by UCI $( date )"
+    echo
+  } > $UNBOUND_CONFFILE
 
 
   {
@@ -319,7 +643,7 @@ unbound_conf() {
       echo
     } >> $UNBOUND_CONFFILE
 
-  else
+  elif [ ! -f "$UNBOUND_TIMEFILE" ] ; then
     logger -t unbound -s "default memory resource consumption"
   fi
 
@@ -395,7 +719,9 @@ unbound_conf() {
       ;;
 
     *)
-      logger -t unbound -s "default recursion configuration"
+      if [ ! -f "$UNBOUND_TIMEFILE" ] ; then
+        logger -t unbound -s "default recursion configuration"
+      fi
       ;;
   esac
 
@@ -453,14 +779,18 @@ unbound_conf() {
   fi
 
 
-  # Domain Exceptions
+  # Except and accept domains as insecure (DNSSEC); work around broken domains
   config_list_foreach "$cfg" "domain_insecure" create_domain_insecure
   echo >> $UNBOUND_CONFFILE
+}
 
+##############################################################################
 
-  ####################
-  # UCI @ network    #
-  ####################
+unbound_access() {
+  # TODO: Unbound 1.6.0 added "tags" and "views", so we can add tags to
+  # each access-control IP block, and then divert access.
+  # -- "guest" WIFI will not be allowed to see local zone data
+  # -- "child" LAN can black whole a list of domains to http~deadpixel
 
 
   if [ "$UNBOUND_B_LOCL_SERV" -gt 0 ] ; then
@@ -468,6 +798,7 @@ unbound_conf() {
     # Prevent DNS amplification attacks by not responding to the universe.
     config_load network
     config_foreach create_access_control interface
+
 
     {
       echo "  access-control: 127.0.0.0/8 allow"
@@ -483,125 +814,292 @@ unbound_conf() {
       echo
     } >> $UNBOUND_CONFFILE
   fi
+
+
+  {
+    # Amend your own "server:" stuff here
+    echo "  include: $UNBOUND_SRV_CONF"
+    echo
+  } >> $UNBOUND_CONFFILE
+}
+
+##############################################################################
+
+unbound_adblock() {
+  # TODO: Unbound 1.6.0 added "tags" and "views"; lets work with adblock team
+  local adb_enabled adb_file
+
+  if [ ! -x /usr/bin/adblock.sh -o ! -x /etc/init.d/adblock ] ; then
+    adb_enabled=0
+  else
+    /etc/init.d/adblock enabled && adb_enabled=1 || adb_enabled=0
+  fi
+
+
+  if [ "$adb_enabled" -gt 0 ] ; then
+    {
+      # Pull in your selected openwrt/pacakges/net/adblock generated lists
+      for adb_file in $UNBOUND_VARDIR/adb_list.* ; do
+        echo "  include: $adb_file"
+      done
+      echo
+    } >> $UNBOUND_CONFFILE
+  fi
+}
+
+##############################################################################
+
+unbound_hostname() {
+  if [ -n "$UNBOUND_TXT_DOMAIN" ] ; then
+    {
+      # TODO: Unbound 1.6.0 added "tags" and "views" and we could make
+      # domains by interface to prevent DNS from "guest" to "home"
+      echo "  local-zone: $UNBOUND_TXT_DOMAIN. $UNBOUND_D_DOMAIN_TYPE"
+      echo "  domain-insecure: $UNBOUND_TXT_DOMAIN"
+      echo "  private-domain: $UNBOUND_TXT_DOMAIN"
+      echo
+      echo "  local-zone: $UNBOUND_TXT_HOSTNAME. $UNBOUND_D_DOMAIN_TYPE"
+      echo "  domain-insecure: $UNBOUND_TXT_HOSTNAME"
+      echo "  private-domain: $UNBOUND_TXT_HOSTNAME"
+      echo
+    } >> $UNBOUND_CONFFILE
+
+
+    case "$UNBOUND_D_DOMAIN_TYPE" in
+    deny|inform_deny|refuse|static)
+      {
+        # avoid upstream involvement in RFC6762 like responses (link only)
+        echo "  local-zone: local. $UNBOUND_D_DOMAIN_TYPE"
+        echo "  domain-insecure: local"
+        echo "  private-domain: local"
+        echo
+      } >> $UNBOUND_CONFFILE
+      ;;
+    esac
+
+
+    if [ "$UNBOUND_D_LAN_FQDN" -gt 0 -o "$UNBOUND_D_WAN_FQDN" -gt 0 ] ; then
+      config_load dhcp
+      config_foreach create_interface_dns dhcp
+    fi
+
+
+    if [ -f "$UNBOUND_DHCP_CONF" ] ; then
+      {
+        # Seed DHCP records because dhcp scripts trigger externally
+        # Incremental Unbound restarts may drop unbound-control add records
+        echo "  include: $UNBOUND_DHCP_CONF"
+        echo
+      } >> $UNBOUND_CONFFILE
+    fi
+  fi
+}
+
+##############################################################################
+
+unbound_records() {
+  if [ "$UNBOUND_D_EXTRA_DNS" -gt 0 ] ; then
+    # Parasite from the uci.dhcp.domain clauses
+    config_load dhcp
+    config_foreach create_host_record domain
+  fi
+
+
+  if [ "$UNBOUND_D_EXTRA_DNS" -gt 1 ] ; then
+    config_foreach create_srv_record srvhost
+    config_foreach create_mx_record mxhost
+  fi
+
+
+  if [ "$UNBOUND_D_EXTRA_DNS" -gt 2 ] ; then
+    config_foreach create_cname_record cname
+  fi
+
+
+  echo >> $UNBOUND_CONFFILE
 }
 
 ##############################################################################
 
 unbound_uci() {
-  local cfg=$1
-  local dnsmasqpath
+  local cfg="$1"
+  local dnsmasqpath hostnm
 
-  ####################
-  # UCI @ unbound    #
-  ####################
+  hostnm=$( uci_get system.@system[0].hostname | awk '{print tolower($0)}' )
+  UNBOUND_TXT_HOSTNAME=${hostnm:-thisrouter}
 
-  config_get_bool UNBOUND_B_DNS64     "$cfg" dns64 0
-  config_get_bool UNBOUND_B_GATE_NAME "$cfg" dnsmasq_gate_name 0
-  config_get_bool UNBOUND_B_DNSMASQ   "$cfg" dnsmasq_link_dns 0
-  config_get_bool UNBOUND_B_HIDE_BIND "$cfg" hide_binddata 1
-  config_get_bool UNBOUND_B_LOCL_NAME "$cfg" dnsmasq_only_local 0
-  config_get_bool UNBOUND_B_LOCL_SERV "$cfg" localservice 1
-  config_get_bool UNBOUND_B_MAN_CONF  "$cfg" manual_conf 0
-  config_get_bool UNBOUND_B_QUERY_MIN "$cfg" query_minimize 0
-  config_get_bool UNBOUND_B_QRY_MINST "$cfg" query_min_strict 0
-  config_get_bool UNBOUND_B_PRIV_BLCK "$cfg" rebind_protection 1
-  config_get_bool UNBOUND_B_LOCL_BLCK "$cfg" rebind_localhost 0
-  config_get_bool UNBOUND_B_CONTROL   "$cfg" unbound_control 0
-  config_get_bool UNBOUND_B_DNSSEC    "$cfg" validator  0
-  config_get_bool UNBOUND_B_NTP_BOOT  "$cfg" validator_ntp 1
+  config_get_bool UNBOUND_B_SLAAC6_MAC "$cfg" dhcp4_slaac6 0
+  config_get_bool UNBOUND_B_DNS64      "$cfg" dns64 0
+  config_get_bool UNBOUND_B_HIDE_BIND  "$cfg" hide_binddata 1
+  config_get_bool UNBOUND_B_LOCL_SERV  "$cfg" localservice 1
+  config_get_bool UNBOUND_B_MAN_CONF   "$cfg" manual_conf 0
+  config_get_bool UNBOUND_B_QUERY_MIN  "$cfg" query_minimize 0
+  config_get_bool UNBOUND_B_QRY_MINST  "$cfg" query_min_strict 0
+  config_get_bool UNBOUND_B_PRIV_BLCK  "$cfg" rebind_protection 1
+  config_get_bool UNBOUND_B_LOCL_BLCK  "$cfg" rebind_localhost 0
+  config_get_bool UNBOUND_B_CONTROL    "$cfg" unbound_control 0
+  config_get_bool UNBOUND_B_DNSSEC     "$cfg" validator 0
+  config_get_bool UNBOUND_B_NTP_BOOT   "$cfg" validator_ntp 1
 
   config_get UNBOUND_IP_DNS64    "$cfg" dns64_prefix "64:ff9b::/96"
 
   config_get UNBOUND_N_EDNS_SIZE "$cfg" edns_size 1280
   config_get UNBOUND_N_RX_PORT   "$cfg" listen_port 53
-  config_get UNBOUND_N_ROOT_AGE  "$cfg" root_age 7
+  config_get UNBOUND_N_ROOT_AGE  "$cfg" root_age 9
 
-  config_get UNBOUND_D_PROTOCOL  "$cfg" protocol mixed
-  config_get UNBOUND_D_RECURSION "$cfg" recursion passive
-  config_get UNBOUND_D_RESOURCE  "$cfg" resource small
+  config_get UNBOUND_D_DOMAIN_TYPE "$cfg" domain_type static
+  config_get UNBOUND_D_DHCP_LINK   "$cfg" dhcp_link none
+  config_get UNBOUND_D_EXTRA_DNS   "$cfg" add_extra_dns 0
+  config_get UNBOUND_D_LAN_FQDN    "$cfg" add_local_fqdn 0
+  config_get UNBOUND_D_PROTOCOL    "$cfg" protocol mixed
+  config_get UNBOUND_D_RECURSION   "$cfg" recursion passive
+  config_get UNBOUND_D_RESOURCE    "$cfg" resource small
+  config_get UNBOUND_D_WAN_FQDN    "$cfg" add_wan_fqdn 0
 
   config_get UNBOUND_TTL_MIN     "$cfg" ttl_min 120
+  config_get UNBOUND_TXT_DOMAIN  "$cfg" domain lan
+
+  UNBOUND_LIST_DOMAINS="nowhere $UNBOUND_TXT_DOMAIN"
+
+  if [ "$UNBOUND_D_DHCP_LINK" = "none" ] ; then
+    config_get_bool UNBOUND_B_DNSMASQ   "$cfg" dnsmasq_link_dns 0
 
 
-  if [ "$UNBOUND_B_DNSMASQ" -gt 0 ] ; then
-    dnsmasqpath=$( which dnsmasq )
+    if [ "$UNBOUND_B_DNSMASQ" -gt 0 ] ; then
+      UNBOUND_D_DHCP_LINK=dnsmasq
 
 
-    if [ ! -x "$dnsmasqpath" ] ; then
+      if [ ! -f "$UNBOUND_TIMEFILE" ] ; then
+        logger -t unbound -s "Please use 'dhcp_link' selector instead"
+      fi
+    fi
+  fi
+
+
+  if [ "$UNBOUND_D_DHCP_LINK" = "dnsmasq" ] ; then
+    if [ ! -x /usr/sbin/dnsmasq -o ! -x /etc/init.d/dnsmasq ] ; then
+      UNBOUND_D_DHCP_LINK=none
+    else
+      /etc/init.d/dnsmasq enabled || UNBOUND_D_DHCP_LINK=none
+    fi
+
+
+    if [ "$UNBOUND_D_DHCP_LINK" = "none" -a ! -f "$UNBOUND_TIMEFILE" ] ; then
       logger -t unbound -s "cannot forward to dnsmasq"
-      UNBOUND_B_DNSMASQ=0
+    fi
+  fi
+
+
+  if [ "$UNBOUND_D_DHCP_LINK" = "odhcpd" ] ; then
+    if [ ! -x /usr/sbin/odhcpd -o ! -x /etc/init.d/odhcpd ] ; then
+      UNBOUND_D_DHCP_LINK=none
+    else
+      /etc/init.d/odhcpd enabled || UNBOUND_D_DHCP_LINK=none
+    fi
+
+
+    if [ "$UNBOUND_D_DHCP_LINK" = "none" -a ! -f "$UNBOUND_TIMEFILE" ] ; then
+      logger -t unbound -s "cannot receive records from odhcpd"
     fi
   fi
 
 
   if [ "$UNBOUND_N_EDNS_SIZE" -lt 512 \
     -o 4096 -lt "$UNBOUND_N_EDNS_SIZE" ] ; then
-    # exceeds range, back to default
+    logger -t unbound -s "edns_size exceeds range, using default"
     UNBOUND_N_EDNS_SIZE=1280
   fi
 
 
-  if [ "$UNBOUND_N_RX_PORT" -lt 1024 \
-    -o 10240 -lt "$UNBOUND_N_RX_PORT" ] ; then
-    # special port or in 5 digits, back to default
+  if [ "$UNBOUND_N_RX_PORT" -ne 53 ] \
+  && [ "$UNBOUND_N_RX_PORT" -lt 1024 -o 10240 -lt "$UNBOUND_N_RX_PORT" ] ; then
+    logger -t unbound -s "privileged port or in 5 digits, using default"
     UNBOUND_N_RX_PORT=53
   fi
 
 
   if [ "$UNBOUND_TTL_MIN" -gt 1800 ] ; then
-    # that could have had awful side effects
+    logger -t unbound -s "ttl_min could have had awful side effects, using 300"
     UNBOUND_TTL_MIN=300
   fi
-
-
-  if [ "$UNBOUND_B_MAN_CONF" -gt 0 ] ; then
-    # Don't want this being triggered. Maybe we could, but then the
-    # base conf you provide would need to be just right.
-    UNBOUND_B_DNSMASQ=0
-
-  else
-    unbound_conf $cfg
-  fi
 }
 
 ##############################################################################
 
-unbound_own () {
-  # Debug UCI
+_resolv_setup() {
+  if [ "$UNBOUND_N_RX_PORT" != "53" ] ; then
+    return
+  fi
+
+  if [ -x /etc/init.d/dnsmasq ] && /etc/init.d/dnsmasq enabled \
+  && nslookup localhost 127.0.0.1#53 >/dev/null 2>&1 ; then
+    # unbound is configured for port 53, but dnsmasq is enabled and a resolver
+    #   listens on localhost:53, lets assume dnsmasq manages the resolver file.
+    # TODO:
+    #   really check if dnsmasq runs a local (main) resolver in stead of using
+    #   nslookup that times out when no resolver listens on localhost:53.
+    return
+  fi
+
+  # unbound is designated to listen on 127.0.0.1#53,
+  #   set resolver file to local.
+  rm -f /tmp/resolv.conf
   {
-    echo "# $UNBOUND_CHECKFILE generated by UCI $( date )"
-    echo
-    set | grep ^UNBOUND_
-  } > $UNBOUND_CHECKFILE
-
-
-  if [ "$UNBOUND_B_MAN_CONF" -gt 0 ] ; then
-    # You are doing your own thing, so just copy /etc/ to /var/
-    cp -p /etc/unbound/* $UNBOUND_VARDIR/
-  fi
-
-
-  # Ensure access and prepare to jail
-  chown -R unbound:unbound $UNBOUND_VARDIR
-  chmod 775 $UNBOUND_VARDIR
-  chmod 664 $UNBOUND_VARDIR/*
+    echo "# /tmp/resolv.conf generated by Unbound UCI $( date )"
+    echo "nameserver 127.0.0.1"
+    echo "nameserver ::1"
+    echo "search $UNBOUND_TXT_DOMAIN"
+  } > /tmp/resolv.conf
 }
 
 ##############################################################################
 
-unbound_prepare() {
-  # Make a home for Unbound in /var/lib/unbound
-  unbound_mkdir
+_resolv_teardown() {
+  case $( cat /tmp/resolv.conf ) in
+  *"generated by Unbound UCI"*)
+    # our resolver file, reset to auto resolver file.
+    rm -f /tmp/resolv.conf
+    ln -s /tmp/resolv.conf.auto /tmp/resolv.conf
+    ;;
+  esac
+}
 
-  # Load up the chunks of UCI
+##############################################################################
+
+unbound_start() {
   config_load unbound
   config_foreach unbound_uci unbound
 
-  # Unbound primary DNS, and dnsmasq side service DHCP-DNS (dnsmasq.sh)
-  dnsmasq_link
 
-  # Unbound needs chroot ownership
-  unbound_own
+  unbound_mkdir
+
+
+  if [ "$UNBOUND_B_MAN_CONF" -eq 0 ] ; then
+    unbound_conf
+    unbound_access
+    unbound_adblock
+
+    if [ "$UNBOUND_D_DHCP_LINK" = "dnsmasq" ] ; then
+      dnsmasq_link
+    else
+      unbound_hostname
+      unbound_records
+    fi
+
+    unbound_control
+  fi
+
+
+  _resolv_setup
+}
+
+##############################################################################
+
+unbound_stop() {
+  _resolv_teardown
+
+
+  rootzone_update
 }
 
 ##############################################################################

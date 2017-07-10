@@ -41,12 +41,8 @@ define Package/loudmouth/description
 endef
 
 CONFIGURE_ARGS += \
-	--with-ssl=openssl
-
-define Build/Configure
-	( cd $(PKG_BUILD_DIR); ./autogen.sh )
-	$(call Build/Configure/Default)
-endef
+	--with-ssl=openssl \
+	--with-idn=no
 
 define Build/InstallDev
 	$(INSTALL_DIR) $(1)/usr/include/

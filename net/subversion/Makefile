@@ -9,10 +9,11 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=subversion
 PKG_RELEASE:=1
-PKG_VERSION:=1.9.5
+PKG_VERSION:=1.9.6
 PKG_SOURCE_URL:=@APACHE/subversion
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.bz2
-PKG_MD5SUM:=9fcbae352a5efe73d46a88c97c6bba14
+PKG_HASH:=dbcbc51fb634082f009121f2cb64350ce32146612787ffb0f7ced351aacaae19
+PKG_MD5SUM:=f27e00338d4a9f7f9aec9d4a3f8b418b
 PKG_LICENSE:=Apache-2.0
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=Val Kulkov <val.kulkov@gmail.com>
@@ -29,7 +30,7 @@ define Package/subversion/Default
   CATEGORY:=Network
   SUBMENU:=Version Control Systems
   TITLE:=A compelling replacement for CVS
-  DEPENDS:=+zlib +libsqlite3 +libapr +libaprutil +libmagic \
+  DEPENDS:=+zlib +libsqlite3 +PACKAGE_unixodbc:unixodbc +libapr +libaprutil +libmagic \
   	$(ICONV_DEPENDS) $(INTL_DEPENDS)
   URL:=http://subversion.apache.org/
 endef
@@ -80,6 +81,7 @@ endef
 
 TARGET_CFLAGS += $(FPIC)
 TARGET_CPPFLAGS += -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE
+APU_LIBS=$(shell $(STAGING_DIR)/usr/bin/apu-1-config --link-libtool --libs)
 
 CONFIGURE_ARGS += \
 	--with-apr="$(STAGING_DIR)/usr/bin/apr-1-config" \
@@ -101,7 +103,7 @@ else
 endif
 
 CONFIGURE_VARS += \
-	LDFLAGS="$(TARGET_LDFLAGS) -lcrypt -lm \
+	LDFLAGS="$(TARGET_LDFLAGS) $(APU_LIBS) -lcrypt -lm \
 		-lz -lpthread $(if $(INTL_FULL),-lintl)"
 	CPPFLAGS="$(TARGET_CPPFLAGS)"
 

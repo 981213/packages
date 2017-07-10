@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2016 Jason A. Donenfeld <Jason@zx2c4.com>
+# Copyright (C) 2016-2017 Jason A. Donenfeld <Jason@zx2c4.com>
 # Copyright (C) 2016 Baptiste Jonglez <openwrt@bitsofnetworks.org>
 # Copyright (C) 2016-2017 Dan Luedtke <mail@danrl.com>
 #
@@ -11,12 +11,12 @@ include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=wireguard
 
-PKG_VERSION:=0.0.20170115
+PKG_VERSION:=0.0.20170706
 PKG_RELEASE:=1
 
 PKG_SOURCE:=WireGuard-$(PKG_VERSION).tar.xz
 PKG_SOURCE_URL:=https://git.zx2c4.com/WireGuard/snapshot/
-PKG_MD5SUM:=7e5f9f4699a2d4ace90d0df5d81bf0f67205ee08c45b95e0acc379bedef5ffe8
+PKG_HASH:=5763b9436265421a67f92cb82142042867fc87c573ecc18033d40c1476146c33
 
 PKG_LICENSE:=GPL-2.0
 PKG_LICENSE_FILES:=COPYING
@@ -33,9 +33,11 @@ include $(INCLUDE_DIR)/package.mk
 define Package/wireguard/Default
   SECTION:=net
   CATEGORY:=Network
+  SUBMENU:=VPN
   URL:=https://www.wireguard.io
   MAINTAINER:=Baptiste Jonglez <openwrt@bitsofnetworks.org>, \
-              Dan Luedtke <mail@danrl.com>
+              Dan Luedtke <mail@danrl.com>, \
+              Jason A. Donenfeld <Jason@zx2c4.com>
 endef
 
 define Package/wireguard/Default/description
@@ -63,6 +65,10 @@ MAKE_PATH:=src/tools
 define Build/Compile
 	$(MAKE) $(KERNEL_MAKEOPTS) M="$(PKG_BUILD_DIR)/src" modules
 	$(call Build/Compile/Default)
+endef
+
+define Package/wireguard/install
+  true
 endef
 
 define Package/wireguard/description
@@ -94,7 +100,7 @@ define KernelPackage/wireguard
   CATEGORY:=Kernel modules
   SUBMENU:=Network Support
   TITLE:=Wireguard kernel module
-  DEPENDS:=+IPV6:kmod-udptunnel6 +kmod-udptunnel4 +kmod-ipt-hashlimit
+  DEPENDS:=+IPV6:kmod-udptunnel6 +kmod-udptunnel4
   FILES:= $(PKG_BUILD_DIR)/src/wireguard.$(LINUX_KMOD_SUFFIX)
   AUTOLOAD:=$(call AutoProbe,wireguard)
 endef
