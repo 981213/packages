@@ -18,12 +18,12 @@ include $(TOPDIR)/rules.mk
 # - add validate type: user
 #
 PKG_NAME:=shadowsocks-libev
-PKG_VERSION:=3.0.6
-PKG_RELEASE:=2
+PKG_VERSION:=3.0.7
+PKG_RELEASE:=3
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://github.com/shadowsocks/shadowsocks-libev/releases/download/v$(PKG_VERSION)
-PKG_HASH:=7d9b43b0235a57c115bfe160efd54abef96bffcbfff61c5496e7c2800f0734ca
+PKG_HASH:=024f2ff501e15ad0cd03dcbac5ca1842aad13dbd51788e522818ff4c129dee18
 
 PKG_MAINTAINER:=Yousong Zhou <yszhou4tech@gmail.com>
 
@@ -107,7 +107,21 @@ uci batch <<-EOF
 EOF
 endef
 
-CONFIGURE_ARGS += --disable-documentation
+define Build/Prepare
+	$(call Build/Prepare/Default)
+	$(FIND) $(PKG_BUILD_DIR) \
+			   -name '*.o' \
+			-o -name '*.lo' \
+			-o -name '.deps' \
+			-o -name '.libs' \
+		| $(XARGS) rm -rvf
+endef
+
+CONFIGURE_ARGS += \
+	--disable-documentation \
+	--disable-silent-rules \
+	--disable-assert \
+	--disable-ssp \
 
 $(eval $(call BuildPackage,shadowsocks-libev-config))
 $(eval $(call BuildPackage,shadowsocks-libev-ss-rules))
