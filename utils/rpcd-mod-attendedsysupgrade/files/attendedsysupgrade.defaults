@@ -5,8 +5,12 @@
 touch /etc/config/attendedsysupgrade
 
 uci -q batch <<EOF
-add attendedsysupgrade settings
-set attendedsysupgrade.@settings[0].update_server=https://betaupdate.libremesh.org
+set attendedsysupgrade.updateserver=updateserver
+set attendedsysupgrade.updateserver.url='https://betaupdate.libremesh.org'
+
+set attendedsysupgrade.updateclient=updateclient
+set attendedsysupgrade.updateclient.update_packages='1'
+
 commit attendedsysupgrade
 EOF
 

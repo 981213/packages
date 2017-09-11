@@ -14,16 +14,23 @@ echo_green() { printf "\033[1;32m$*\033[m\n"; }
 echo_blue()  { printf "\033[1;34m$*\033[m\n"; }
 
 exec_status() {
-	("$@" 2>&1) > logoutput && status=0 || status=1
-	grep -qE 'WARNING|ERROR' logoutput && status=1
-	cat logoutput
-	if [ $status -eq 0 ]; then
-		echo_green "=> $* successful"
-		return 0
-	else
-		echo_red   "=> $* failed"
+	PATTERN="$1"
+	shift
+	while :;do sleep 590;echo "still running (please don't kill me Travis)";done &
+	("$@" 2>&1) | tee logoutput
+	R=${PIPESTATUS[0]}
+	kill $! && wait $! 2>/dev/null
+	if [ $R -ne 0 ]; then
+		echo_red   "=> '$*' failed (return code $R)"
 		return 1
 	fi
+	if grep -qE "$PATTERN" logoutput; then
+		echo_red   "=> '$*' failed (log matched '$PATTERN')"
+		return 1
+	fi
+
+	echo_green "=> '$*' successful"
+	return 0
 }
 
 # download will run on the `before_script` step
@@ -58,7 +65,7 @@ download_sdk() {
 # test_package call make download check for very new/modified package
 test_packages2() {
 	# search for new or modified packages. PKGS will hold a list of package like 'admin/muninlite admin/monit ...'
-	PKGS=$(git diff --name-only "$TRAVIS_COMMIT_RANGE" | grep 'Makefile$' | grep -v '/files/' | awk -F'/Makefile' '{ print $1 }')
+	PKGS=$(git diff --diff-filter=d --name-only "$TRAVIS_COMMIT_RANGE" | grep 'Makefile$' | grep -v '/files/' | awk -F'/Makefile' '{ print $1 }')
 
 	if [ -z "$PKGS" ] ; then
 		echo_blue "No new or modified packages found!"
@@ -82,6 +89,9 @@ src-link packages $PACKAGES_DIR
 src-git luci https://github.com/openwrt/luci.git
 EOF
 
+	# enable BUILD_LOG
+	sed -i '1s/^/config BUILD_LOG\n\tbool\n\tdefault y\n\n/' Config-build.in
+
 	./scripts/feeds update -a
 	./scripts/feeds install -a
 	make defconfig
@@ -92,12 +102,36 @@ EOF
 	# pkg_name => muninlite
 	for pkg_dir in $PKGS ; do
 		pkg_name=$(echo "$pkg_dir" | awk -F/ '{ print $NF }')
-		echo_blue "=== $pkg_name Testing package"
+		echo_blue "=== $pkg_name: Starting quick tests"
 
-		exec_status make "package/$pkg_name/download" V=s || RET=1
-		exec_status make "package/$pkg_name/check" V=s || RET=1
+		exec_status 'WARNING|ERROR' make "package/$pkg_name/download" V=s || RET=1
+		exec_status 'WARNING|ERROR' make "package/$pkg_name/check" V=s || RET=1
 
-		echo_blue "=== $pkg_name Finished package"
+		echo_blue "=== $pkg_name: quick tests done"
+	done
+
+	[ $RET -ne 0 ] && return $RET
+
+	for pkg_dir in $PKGS ; do
+		pkg_name=$(echo "$pkg_dir" | awk -F/ '{ print $NF }')
+		echo_blue "=== $pkg_name: Starting compile test"
+
+		# we can't enable verbose built else we often hit Travis limits
+		# on log size and the job get killed
+		exec_status '^ERROR' make "package/$pkg_name/compile" -j3 || RET=1
+
+		echo_blue "=== $pkg_name: compile test done"
+
+		echo_blue "=== $pkg_name: begin compile logs"
+		for f in $(find logs/package/feeds/packages/$pkg_name/ -type f); do
+			echo_blue "Printing $f"
+			cat "$f"
+		done
+		echo_blue "=== $pkg_name: end compile logs"
+
+		echo_blue "=== $pkg_name: begin packages sizes"
+		du -ba bin/
+		echo_blue "=== $pkg_name: end packages sizes"
 	done
 
 	return $RET
@@ -121,7 +155,7 @@ test_commits() {
 		fi
 
 		subject="$(git show -s --format=%s $commit)"
-		if echo "$subject" | grep -q '^[0-9A-Za-z,/-]\+: '; then
+		if echo "$subject" | grep -q -e '^[0-9A-Za-z,/-]\+: ' -e '^Revert '; then
 			echo_green "Commit subject line seems ok ($subject)"
 		else
 			echo_red "Commit subject line MUST start with '<package name>: ' ($subject)"
@@ -142,18 +176,17 @@ test_commits() {
 }
 
 test_packages() {
-	GRET=0
-	test_commits   || GRET=1
-	test_packages2 || GRET=1
-	return $GRET
+	test_commits && test_packages2 || return 1
 }
 
 echo_blue "=== Travis ENV"
 env
 echo_blue "=== Travis ENV"
 
-until [ "$(git rev-list ${TRAVIS_COMMIT_RANGE/.../..} | tail -n1)" != "a22de9b74cf9579d1ce7e6cf1845b4afa4277b00" ]; do
-	# if clone depth is too small, git rev-list / diff return incorrect results
+while true; do
+	# if clone depth is too small, git rev-list / diff return incorrect or empty results
+	C="$(git rev-list ${TRAVIS_COMMIT_RANGE/.../..} | tail -n1)" 2>/dev/null
+	[ -n "$C" -a "$C" != "a22de9b74cf9579d1ce7e6cf1845b4afa4277b00" ] && break
 	echo_blue "Fetching 50 commits more"
 	git fetch origin --deepen=50
 done
