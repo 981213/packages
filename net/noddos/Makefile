@@ -9,13 +9,14 @@ include $(TOPDIR)/rules.mk
 
 # Name and release number of this package
 PKG_NAME:=noddos
-PKG_RELEASE:=2
+PKG_RELEASE:=1
 PKG_LICENSE:=GPLv3
+PKG_MAINTAINER:=Steven Hessing <steven.hessing@gmail.com>
 
-PKG_SOURCE_VERSION:=0.4.1
+PKG_SOURCE_VERSION:=0.5.1
 PKG_SOURCE_URL:=https://github.com/noddos/noddos/releases/download/v$(PKG_SOURCE_VERSION)/
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_SOURCE_VERSION).tar.xz
-PKG_HASH:=f676b1c7d9aa6496184b73eacbbfe27b4f54e53c726769ef9ceeeda9c31a7fa3
+PKG_HASH:=246bccaf9b4ad589a2884da3bfa449e4adc5fcb951307f1b5a5c2c1bcdef95c1
 
 PKG_BUILD_DIR := $(BUILD_DIR)/$(PKG_NAME)-$(PKG_SOURCE_VERSION)
 
@@ -28,7 +29,7 @@ define Package/noddos
 	CATEGORY:=Network
 	TITLE:=noddos -- device-aware cloud-powered firewall
 	URL:=https://www.noddos.io/
-	DEPENDS:=+libstdcpp +libnetfilter-conntrack +libcurl +libopenssl +openssl-util +ca-bundle +ca-certificates +wget +bzip2 +libtins +ipset
+	DEPENDS:=+libstdcpp +libnetfilter-conntrack +libcurl +libopenssl +openssl-util +ca-bundle +ca-certificates +wget +bzip2 +libtins +ipset +libpthread
 endef
 
 define Package/noddos/description
