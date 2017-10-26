@@ -6,7 +6,7 @@ set -e
 
 SDK_HOME="$HOME/sdk"
 SDK_PATH=https://downloads.lede-project.org/snapshots/targets/ar71xx/generic/
-SDK=lede-sdk-ar71xx-generic_gcc-5.4.0_musl.Linux-x86_64
+SDK=lede-sdk-ar71xx-generic_gcc-5.5.0_musl.Linux-x86_64
 PACKAGES_DIR="$PWD"
 
 echo_red()   { printf "\033[1;31m$*\033[m\n"; }
@@ -45,9 +45,12 @@ download_sdk() {
 	wget "$SDK_PATH/sha256sums.gpg" -O sha256sums.asc
 
 	# LEDE Build System (LEDE GnuPG key for unattended build jobs)
-	gpg --recv 0xCD84BCED626471F1
+	gpg --import $PACKAGES_DIR/.travis/626471F1.asc
+	echo '54CC74307A2C6DC9CE618269CD84BCED626471F1:6:' | gpg --import-ownertrust
 	# LEDE Release Builder (17.01 "Reboot" Signing Key)
-	gpg --recv 0x833C6010D52BBB6B
+	gpg --import $PACKAGES_DIR/.travis/D52BBB6B.asc
+	echo 'B09BE781AE8A0CD4702FDCD3833C6010D52BBB6B:6:' | gpg --import-ownertrust
+
 	gpg --verify sha256sums.asc
 	grep "$SDK" sha256sums > sha256sums.small
 
