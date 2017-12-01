@@ -13,7 +13,7 @@
  */
 
 #define _GNU_SOURCE
-#define AUC_VERSION "0.0.3"
+#define AUC_VERSION "0.0.8"
 
 #include <fcntl.h>
 #include <dlfcn.h>
@@ -41,6 +41,7 @@
 
 static char user_agent[80];
 static char *serverurl;
+static int upgrade_packages;
 static struct ustream_ssl_ctx *ssl_ctx;
 static const struct ustream_ssl_ops *ssl_ops;
 static off_t out_bytes;
@@ -48,12 +49,13 @@ static off_t out_len;
 static off_t out_offset;
 static bool cur_resume;
 static int output_fd = -1;
-static int retry, imagebuilder, building;
+static int retry, imagebuilder, building, ibready;
 static char *board_name = NULL;
 static char *target = NULL, *subtarget = NULL;
 static char *distribution = NULL, *version = NULL, *revision = NULL;
 static int uptodate;
 static char *filename = NULL;
+static int debug = 0;
 
 /*
  * policy for ubus call system board
@@ -135,20 +137,21 @@ static const struct blobmsg_policy upgtest_policy[__UPGTEST_MAX] = {
  */
 enum {
 	CHECK_VERSION,
+	CHECK_UPGRADES,
 	__CHECK_MAX,
 };
 
 static const struct blobmsg_policy check_policy[__CHECK_MAX] = {
 	[CHECK_VERSION] = { .name = "version", .type = BLOBMSG_TYPE_STRING },
+	[CHECK_UPGRADES] = { .name = "upgrades", .type = BLOBMSG_TYPE_TABLE },
 };
 
 /*
  * policy for upgrade-request response
- * it can be either only a queue position or the download information
- * for the ready image.
+ * parse download information for the ready image.
  */
 enum {
-	IMAGE_QUEUE,
+	IMAGE_REQHASH,
 	IMAGE_FILESIZE,
 	IMAGE_URL,
 	IMAGE_CHECKSUM,
@@ -158,7 +161,7 @@ enum {
 };
 
 static const struct blobmsg_policy image_policy[__IMAGE_MAX] = {
-	[IMAGE_QUEUE] = { .name = "queue", .type = BLOBMSG_TYPE_INT32 },
+	[IMAGE_REQHASH] = { .name = "request_hash", .type = BLOBMSG_TYPE_STRING },
 	[IMAGE_FILESIZE] = { .name = "filesize", .type = BLOBMSG_TYPE_INT32 },
 	[IMAGE_URL] = { .name = "url", .type = BLOBMSG_TYPE_STRING },
 	[IMAGE_CHECKSUM] = { .name = "checksum", .type = BLOBMSG_TYPE_STRING },
@@ -166,14 +169,13 @@ static const struct blobmsg_policy image_policy[__IMAGE_MAX] = {
 	[IMAGE_SYSUPGRADE] = { .name = "sysupgrade", .type = BLOBMSG_TYPE_STRING },
 };
 
-
 /*
  * load serverurl from UCI
  */
 static int load_config() {
 	static struct uci_context *uci_ctx;
 	static struct uci_package *uci_attendedsysupgrade;
-	struct uci_section *uci_server;
+	struct uci_section *uci_s;
 
 	uci_ctx = uci_alloc_context();
 	if (!uci_ctx)
@@ -186,12 +188,21 @@ static int load_config() {
 		fprintf(stderr, "Failed to load attendedsysupgrade config\n");
 		return -1;
 	}
-	uci_server = uci_lookup_section(uci_ctx, uci_attendedsysupgrade, "server");
-	if (!uci_server) {
+
+	uci_s = uci_lookup_section(uci_ctx, uci_attendedsysupgrade, "server");
+	if (!uci_s) {
 		fprintf(stderr, "Failed to read server url from config\n");
 		return -1;
 	}
-	serverurl = strdup(uci_lookup_option_string(uci_ctx, uci_server, "url"));
+	serverurl = strdup(uci_lookup_option_string(uci_ctx, uci_s, "url"));
+
+	uci_s = uci_lookup_section(uci_ctx, uci_attendedsysupgrade, "client");
+	if (!uci_s) {
+		fprintf(stderr, "Failed to read client config\n");
+		return -1;
+	}
+	upgrade_packages = atoi(uci_lookup_option_string(uci_ctx, uci_s, "upgrade_packages"));
+
 	uci_free_context(uci_ctx);
 
 	return 0;
@@ -324,8 +335,19 @@ free:
 	return ret;
 }
 
+struct jsonblobber {
+	json_tokener *tok;
+	struct blob_buf *outbuf;
+};
+
 static void request_done(struct uclient *cl)
 {
+	struct jsonblobber *jsb = (struct jsonblobber *)cl->priv;
+	if (jsb) {
+		json_tokener_free(jsb->tok);
+		free(jsb);
+	};
+
 	uclient_disconnect(cl);
 	uloop_end();
 }
@@ -335,20 +357,24 @@ static void header_done_cb(struct uclient *cl)
 	enum {
 		H_RANGE,
 		H_LEN,
+		H_IBSTATUS,
+		H_IBQUEUEPOS,
 		__H_MAX
 	};
 	static const struct blobmsg_policy policy[__H_MAX] = {
 		[H_RANGE] = { .name = "content-range", .type = BLOBMSG_TYPE_STRING },
 		[H_LEN] = { .name = "content-length", .type = BLOBMSG_TYPE_STRING },
+		[H_IBSTATUS] = { .name = "x-imagebuilder-status", .type = BLOBMSG_TYPE_STRING },
+		[H_IBQUEUEPOS] = { .name = "x-build-queue-position", .type = BLOBMSG_TYPE_STRING },
 	};
 	struct blob_attr *tb[__H_MAX];
 	uint64_t resume_offset = 0, resume_end, resume_size;
-	static int retries;
+	char *ibstatus;
+	unsigned int queuepos = 0;
 
-	if (retries < 10 && uclient_http_redirect(cl)) {
+	if (uclient_http_redirect(cl)) {
 		fprintf(stderr, "Redirected to %s on %s\n", cl->url->location, cl->url->host);
 
-		retries++;
 		return;
 	}
 
@@ -359,10 +385,21 @@ static void header_done_cb(struct uclient *cl)
 		return;
 	}
 
+	if (debug)
+		fprintf(stderr, "headers:\n%s\n", blobmsg_format_json_indent(cl->meta, true, 0));
+
 	blobmsg_parse(policy, __H_MAX, tb, blob_data(cl->meta), blob_len(cl->meta));
 
 	switch (cl->status_code) {
 	case 400:
+		request_done(cl);
+		break;
+	case 412:
+		fprintf(stderr, "target not found.\n");
+		request_done(cl);
+		break;
+	case 413:
+		fprintf(stderr, "image too big.\n");
 		request_done(cl);
 		break;
 	case 416:
@@ -373,12 +410,9 @@ static void header_done_cb(struct uclient *cl)
 		fprintf(stderr, "unknown package requested.\n");
 		request_done(cl);
 		break;
-	case 201:
-		if (!imagebuilder) {
-			fprintf(stderr, "server is dispatching build job\n");
-			imagebuilder=1;
-		}
-		retry=1;
+	case 501:
+		fprintf(stderr, "ImageBuilder didn't produce sysupgrade file.\n");
+		request_done(cl);
 		break;
 	case 204:
 		fprintf(stderr, "system is up to date.\n");
@@ -386,11 +420,7 @@ static void header_done_cb(struct uclient *cl)
 		break;
 	case 206:
 		if (!cur_resume) {
-			if (!building) {
-				fprintf(stderr, "server is now building image...\n");
-				building=1;
-			}
-			retry=1;
+			fprintf(stderr, "Error: Partial content received, full content requested\n");
 			request_done(cl);
 			break;
 		}
@@ -406,6 +436,39 @@ static void header_done_cb(struct uclient *cl)
 			fprintf(stderr, "Content-Range header is invalid\n");
 			break;
 		}
+	case 202:
+		if (!tb[H_IBSTATUS])
+			break;
+
+		ibstatus = blobmsg_get_string(tb[H_IBSTATUS]);
+
+		if (!strncmp(ibstatus, "queue", 6)) {
+			if (!imagebuilder) {
+				fprintf(stderr, "server is dispatching build job\n");
+				imagebuilder=1;
+			} else {
+				if (tb[H_IBQUEUEPOS]) {
+					queuepos = atoi(blobmsg_get_string(tb[H_IBQUEUEPOS]));
+					fprintf(stderr, "build is in queue position %u.\n", queuepos);
+				}
+			}
+			retry=1;
+		} else if (!strncmp(ibstatus, "building", 9)) {
+			if (!building) {
+				fprintf(stderr, "server is now building image...\n");
+				building=1;
+			}
+			retry=1;
+		} else if (!strncmp(ibstatus, "initialize", 11)) {
+			if (!ibready) {
+				fprintf(stderr, "server is setting up ImageBuilder...\n");
+				ibready=1;
+			}
+			retry=1;
+		} else {
+			fprintf(stderr, "unrecognized remote imagebuilder status '%s'\n", ibstatus);
+		}
+		// fall through
 	case 200:
 		if (cl->priv)
 			break;
@@ -431,12 +494,12 @@ static void read_data_cb(struct uclient *cl)
 {
 	char buf[256];
 	int len;
-	json_tokener *tok;
 	json_object *jsobj;
+	struct blob_buf *outbuf = NULL;
+	json_tokener *tok = NULL;
+	struct jsonblobber *jsb = (struct jsonblobber *)cl->priv;
 
-	struct blob_buf *outbuf = (struct blob_buf *)cl->priv;
-
-	if (!outbuf) {
+	if (!jsb) {
 		while (1) {
 			len = uclient_read(cl, buf, sizeof(buf));
 			if (!len)
@@ -448,8 +511,9 @@ static void read_data_cb(struct uclient *cl)
 		return;
 	}
 
-	tok = json_tokener_new();
-	
+	outbuf = jsb->outbuf;
+	tok = jsb->tok;
+
 	while (1) {
 		len = uclient_read(cl, buf, sizeof(buf));
 		if (!len)
@@ -474,8 +538,6 @@ static void read_data_cb(struct uclient *cl)
 			break;
 		}
 	}
-
-	json_tokener_free(tok);
 }
 
 static void eof_cb(struct uclient *cl)
@@ -521,6 +583,7 @@ static const struct uclient_cb check_cb = {
 
 static int server_request(const char *url, struct blob_buf *inbuf, struct blob_buf *outbuf) {
 	struct uclient *ucl;
+	struct jsonblobber *jsb = NULL;
 	int rc = -1;
 	char *post_data;
 	out_offset = 0;
@@ -530,9 +593,15 @@ static int server_request(const char *url, struct blob_buf *inbuf, struct blob_b
 	uloop_init();
 
 	ucl = uclient_new(url, NULL, &check_cb);
+	if (outbuf) {
+		jsb = malloc(sizeof(struct jsonblobber));
+		jsb->outbuf = outbuf;
+		jsb->tok = json_tokener_new();
+	};
+
 	uclient_http_set_ssl_ctx(ucl, ssl_ops, ssl_ctx, 1);
 	ucl->timeout_msecs = REQ_TIMEOUT * 1000;
-	ucl->priv = outbuf;
+	ucl->priv = jsb;
 	rc = uclient_connect(ucl);
 	if (rc)
 		return rc;
@@ -631,19 +700,40 @@ static char *md5sum(const char *file) {
 
 static int ask_user(void)
 {
-	fprintf(stderr, "Are you sure to proceed? [N/y]\n");
+	fprintf(stderr, "Are you sure you want to continue the upgrade process? [N/y] ");
 	if (getchar() != 'y')
 		return -1;
 	return 0;
 }
 
+static void print_package_updates(struct blob_attr *upgrades) {
+	struct blob_attr *cur;
+	struct blob_attr *tb[2];
+	int rem;
+
+	static struct blobmsg_policy policy[2] = {
+		{ .type = BLOBMSG_TYPE_STRING },
+		{ .type = BLOBMSG_TYPE_STRING },
+	};
+
+	blobmsg_for_each_attr(cur, upgrades, rem) {
+		blobmsg_parse_array(policy, ARRAY_SIZE(policy), tb, blobmsg_data(cur), blobmsg_data_len(cur));
+		if (!tb[0] || !tb[1])
+			continue;
+
+		fprintf(stdout, "\t%s (%s -> %s)\n", blobmsg_name(cur),
+			blobmsg_get_string(tb[1]), blobmsg_get_string(tb[0]));
+	};
+}
+
 /* this main function is too big... todo: split */
 int main(int args, char *argv[]) {
+	unsigned char argc=1;
 	static struct blob_buf checkbuf, reqbuf, imgbuf, upgbuf;
 	struct ubus_context *ctx = ubus_connect(NULL);
 	uint32_t id;
 	int rc;
-	int queuepos, valid;
+	int queuepos, valid, use_get;
 	char url[256];
 	char *newversion = NULL;
 	struct blob_attr *tb[__IMAGE_MAX];
@@ -651,6 +741,23 @@ int main(int args, char *argv[]) {
 	unsigned int filesize;
 	char *checksum = NULL;
 	struct stat imgstat;
+
+	snprintf(user_agent, sizeof(user_agent), "%s (%s)", argv[0], AUC_VERSION);
+	fprintf(stdout, "%s\n", user_agent);
+
+	while (argc<args) {
+		if (!strncmp(argv[argc], "-h", 3) ||
+		    !strncmp(argv[argc], "--help", 7)) {
+			fprintf(stdout, "%s: Attended sysUpgrade CLI client\n", argv[0]);
+			fprintf(stdout, "Usage: auc [-d] [-h]\n");
+			fprintf(stdout, " -d\tenable debugging output\n");
+			fprintf(stdout, " -h\toutput help\n");
+			return 0;
+		}
+		if (!strncmp(argv[argc], "-d", 3))
+			debug = 1;
+		argc++;
+	};
 
 	if (!ctx) {
 		fprintf(stderr, "failed to connect to ubus.\n");
@@ -684,10 +791,6 @@ int main(int args, char *argv[]) {
 	blobmsg_buf_init(&imgbuf);
 	blobmsg_buf_init(&upgbuf);
 
-	snprintf(user_agent, sizeof(user_agent), "%s (%s)", argv[0], AUC_VERSION);
-
-	fprintf(stderr, "%s\n", user_agent);
-
 	if (ubus_lookup_id(ctx, "system", &id) ||
 	    ubus_invoke(ctx, id, "board", NULL, board_cb, &checkbuf, 3000)) {
 		fprintf(stderr, "cannot request board info from procd\n");
@@ -702,10 +805,13 @@ int main(int args, char *argv[]) {
 		goto freeboard;
 	}
 
-	fprintf(stderr, "running %s %s %s on %s/%s (%s)\n", distribution, version,
-		revision, target, subtarget, board_name);
+	blobmsg_add_u32(&checkbuf, "upgrade_packages", upgrade_packages);
 
-	fprintf(stderr, "checking %s for sysupgrade\n", serverurl);
+	fprintf(stdout, "running %s %s %s on %s/%s (%s)\n", distribution,
+		version, revision, target, subtarget, board_name);
+
+	fprintf(stdout, "checking %s for release upgrade%s\n", serverurl,
+		upgrade_packages?" or updated packages":"");
 
 	blobmsg_add_string(&reqbuf, "distro", distribution);
 	blobmsg_add_string(&reqbuf, "target", target);
@@ -714,13 +820,27 @@ int main(int args, char *argv[]) {
 
 	snprintf(url, sizeof(url), "%s/%s", serverurl, APIOBJ_CHECK);
 	uptodate=0;
-	if (server_request(url, &checkbuf, &reqbuf)) {
-		fprintf(stderr, "failed to connect to server\n");
-		rc=-1;
-		goto freeboard;
-	};
+
+	do {
+		retry=0;
+		if (debug)
+			fprintf(stderr, "requesting:\n%s\n", blobmsg_format_json_indent(checkbuf.head, true, 0));
+		if (server_request(url, &checkbuf, &reqbuf)) {
+			fprintf(stderr, "failed to connect to server\n");
+			rc=-1;
+			goto freeboard;
+		};
+
+		if (retry)
+			sleep(3);
+	} while(retry);
+
+	if (debug)
+		fprintf(stderr, "reply:\n%s\n", blobmsg_format_json_indent(reqbuf.head, true, 0));
+
 	blobmsg_parse(check_policy, __CHECK_MAX, tbc, blob_data(reqbuf.head), blob_len(reqbuf.head));
-	if (!tbc[CHECK_VERSION]) {
+
+	if (!tbc[CHECK_VERSION] && !tbc[CHECK_UPGRADES]) {
 		if (!uptodate) {
 			fprintf(stderr, "server reply invalid.\n");
 			rc=-1;
@@ -729,8 +849,18 @@ int main(int args, char *argv[]) {
 		rc=0;
 		goto freeboard;
 	}
-	newversion = blobmsg_get_string(tbc[CHECK_VERSION]);
-	fprintf(stderr, "new release %s found.\n", newversion);
+	if (tbc[CHECK_VERSION]) {
+		newversion = blobmsg_get_string(tbc[CHECK_VERSION]);
+		fprintf(stdout, "new %s release %s found.\n", distribution, newversion);
+	} else {
+		fprintf(stdout, "staying on %s release version %s\n", distribution, version);
+		blobmsg_add_string(&reqbuf, "version", version);
+	};
+
+	if (tbc[CHECK_UPGRADES]) {
+		fprintf(stdout, "package updates:\n");
+		print_package_updates(tbc[CHECK_UPGRADES]);
+	}
 
 	rc = ask_user();
 	if (rc)
@@ -740,24 +870,37 @@ int main(int args, char *argv[]) {
 
 	imagebuilder = 0;
 	building = 0;
+	use_get = 0;
 
 	do {
-		queuepos = 0;
 		retry = 0;
-		server_request(url, &reqbuf, &imgbuf);
+
+		if (debug && !use_get)
+			fprintf(stderr, "requesting:\n%s\n", blobmsg_format_json_indent(reqbuf.head, true, 0));
+
+		server_request(url, use_get?NULL:&reqbuf, &imgbuf);
 		blobmsg_parse(image_policy, __IMAGE_MAX, tb, blob_data(imgbuf.head), blob_len(imgbuf.head));
 
-		if (tb[IMAGE_QUEUE]) {
-			queuepos = blobmsg_get_u32(tb[IMAGE_QUEUE]);
-			fprintf(stderr, "build is in queue position %u.\n", queuepos);
+		if (!use_get && tb[IMAGE_REQHASH]) {
+			snprintf(url, sizeof(url), "%s/%s/%s", serverurl,
+				 APIOBJ_REQUEST,
+				 blobmsg_get_string(tb[IMAGE_REQHASH]));
+			if (debug)
+				fprintf(stderr, "polling via GET %s\n", url);
+
+			retry=1;
+			use_get=1;
 		}
 
-		if (retry || queuepos) {
+		if (retry) {
 			blob_buf_free(&imgbuf);
 			blobmsg_buf_init(&imgbuf);
 			sleep(3);
 		}
 	} while(retry || queuepos);
+
+	if (debug)
+		fprintf(stderr, "reply:\n%s\n", blobmsg_format_json_indent(imgbuf.head, true, 0));
 
 	if (!tb[IMAGE_SYSUPGRADE]) {
 		fprintf(stderr, "no sysupgrade image returned\n");
@@ -814,20 +957,16 @@ int main(int args, char *argv[]) {
 		}
 	}
 
-	if (!ubus_lookup_id(ctx, "rpc-sys", &id)) {
-		valid = 0;
-		ubus_invoke(ctx, id, "upgrade_test", NULL, upgtest_cb, &valid, 3000);
-		if (!valid) {
-			rc=-1;
-			goto freeboard;
-		}
-
-		blobmsg_add_u8(&upgbuf, "keep", 1);
-		fprintf(stderr, "invoking sysupgrade\n");
-		ubus_invoke(ctx, id, "upgrade_start", upgbuf.head, NULL, NULL, 3000);
-	} else {
+	valid = 0;
+	ubus_invoke(ctx, id, "upgrade_test", NULL, upgtest_cb, &valid, 3000);
+	if (!valid) {
 		rc=-1;
+		goto freeboard;
 	}
+
+	blobmsg_add_u8(&upgbuf, "keep", 1);
+	fprintf(stdout, "invoking sysupgrade\n");
+	ubus_invoke(ctx, id, "upgrade_start", upgbuf.head, NULL, NULL, 3000);
 
 freeboard:
 	free(board_name);
